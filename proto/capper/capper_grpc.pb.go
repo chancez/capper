@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CapperClient interface {
 	Capture(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (*CaptureResponse, error)
+	StreamCapture(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (Capper_StreamCaptureClient, error)
 }
 
 type capperClient struct {
@@ -42,11 +43,44 @@ func (c *capperClient) Capture(ctx context.Context, in *CaptureRequest, opts ...
 	return out, nil
 }
 
+func (c *capperClient) StreamCapture(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (Capper_StreamCaptureClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Capper_ServiceDesc.Streams[0], "/capper.Capper/StreamCapture", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &capperStreamCaptureClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Capper_StreamCaptureClient interface {
+	Recv() (*StreamCaptureResponse, error)
+	grpc.ClientStream
+}
+
+type capperStreamCaptureClient struct {
+	grpc.ClientStream
+}
+
+func (x *capperStreamCaptureClient) Recv() (*StreamCaptureResponse, error) {
+	m := new(StreamCaptureResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // CapperServer is the server API for Capper service.
 // All implementations must embed UnimplementedCapperServer
 // for forward compatibility
 type CapperServer interface {
 	Capture(context.Context, *CaptureRequest) (*CaptureResponse, error)
+	StreamCapture(*CaptureRequest, Capper_StreamCaptureServer) error
 	mustEmbedUnimplementedCapperServer()
 }
 
@@ -56,6 +90,9 @@ type UnimplementedCapperServer struct {
 
 func (UnimplementedCapperServer) Capture(context.Context, *CaptureRequest) (*CaptureResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Capture not implemented")
+}
+func (UnimplementedCapperServer) StreamCapture(*CaptureRequest, Capper_StreamCaptureServer) error {
+	return status.Errorf(codes.Unimplemented, "method StreamCapture not implemented")
 }
 func (UnimplementedCapperServer) mustEmbedUnimplementedCapperServer() {}
 
@@ -88,6 +125,27 @@ func _Capper_Capture_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Capper_StreamCapture_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(CaptureRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CapperServer).StreamCapture(m, &capperStreamCaptureServer{stream})
+}
+
+type Capper_StreamCaptureServer interface {
+	Send(*StreamCaptureResponse) error
+	grpc.ServerStream
+}
+
+type capperStreamCaptureServer struct {
+	grpc.ServerStream
+}
+
+func (x *capperStreamCaptureServer) Send(m *StreamCaptureResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Capper_ServiceDesc is the grpc.ServiceDesc for Capper service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -100,6 +158,12 @@ var Capper_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Capper_Capture_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamCapture",
+			Handler:       _Capper_StreamCapture_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "proto/capper/capper.proto",
 }

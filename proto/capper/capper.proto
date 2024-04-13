@@ -9,6 +9,7 @@ option go_package = "github.com/chancez/capper/proto/capper";
 
 service Capper {
   rpc Capture(CaptureRequest) returns (CaptureResponse) {}
+  rpc StreamCapture(CaptureRequest) returns (stream StreamCaptureResponse) {}
 }
 
 message CaptureRequest {
@@ -19,4 +20,8 @@ message CaptureRequest {
 
 message CaptureResponse {
   bytes pcap = 1;
+}
+
+message StreamCaptureResponse {
+  bytes data = 1;
 }
