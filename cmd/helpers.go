@@ -13,7 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-func newHandle(ctx context.Context, device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
+func newHandle(device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
 	inactive, err := pcap.NewInactiveHandle(device)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (c *packetCapture) Run(ctx context.Context, device string, filter string, s
 	count := uint64(0)
 	c.log.Debug("starting capture", "num_packets", numPackets, "duration", captureDuration)
 
-	handle, err := newHandle(ctx, device, filter, snaplen, promisc)
+	handle, err := newHandle(device, filter, snaplen, promisc)
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
