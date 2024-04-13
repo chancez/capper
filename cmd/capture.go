@@ -55,36 +55,44 @@ func init() {
 	captureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 }
 
-func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool) error {
+func newHandle(ctx context.Context, device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
 	inactive, err := pcap.NewInactiveHandle(device)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer inactive.CleanUp()
 
 	if err := inactive.SetSnapLen(snaplen); err != nil {
-		return fmt.Errorf("error setting snaplen on handle: %w", err)
+		return nil, fmt.Errorf("error setting snaplen on handle: %w", err)
 	}
 
 	if err := inactive.SetPromisc(promisc); err != nil {
-		return fmt.Errorf("error setting promiscuous mode on handle: %w", err)
+		return nil, fmt.Errorf("error setting promiscuous mode on handle: %w", err)
 	}
 
 	if err := inactive.SetTimeout(time.Second); err != nil {
-		return fmt.Errorf("error setting timeout on handle: %w", err)
+		return nil, fmt.Errorf("error setting timeout on handle: %w", err)
 	}
 
 	handle, err := inactive.Activate()
 	if err != nil {
-		return fmt.Errorf("error activating handle: %w", err)
+		return nil, fmt.Errorf("error activating handle: %w", err)
 	}
-	defer handle.Close()
 
 	if filter != "" {
 		if err := handle.SetBPFFilter(filter); err != nil {
-			return fmt.Errorf("error setting filter on handle: %w", err)
+			return nil, fmt.Errorf("error setting filter on handle: %w", err)
 		}
 	}
+	return handle, nil
+}
+
+func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool) error {
+	handle, err := newHandle(ctx, device, filter, snaplen, promisc)
+	if err != nil {
+		return fmt.Errorf("error creating handle: %w", err)
+	}
+	defer handle.Close()
 
 	var pcapw *pcapgo.Writer
 	if outputFile != "" {
