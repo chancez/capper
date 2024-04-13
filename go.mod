@@ -3,7 +3,7 @@ module github.com/chancez/capper
 go 1.22.2
 
 require (
-	github.com/google/gopacket v1.1.19
+	github.com/gopacket/gopacket v1.2.0
 	github.com/jonboulle/clockwork v0.4.0
 	github.com/spf13/cobra v1.8.0
 	google.golang.org/grpc v1.63.2
