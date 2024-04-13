@@ -12,7 +12,7 @@ import (
 
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/pcapgo"
+	"github.com/gopacket/gopacket/pcap"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -46,9 +46,13 @@ func runServer(listen string) error {
 
 	logger := slog.Default()
 	slog.SetLogLoggerLevel(slog.LevelDebug)
+
 	srv := &server{
-		clock: clockwork.NewRealClock(),
-		log:   logger,
+		clock:   clockwork.NewRealClock(),
+		log:     logger,
+		device:  "any",
+		snaplen: 262144,
+		promisc: true,
 	}
 	capperpb.RegisterCapperServer(s, srv)
 	reflection.Register(s)
@@ -61,101 +65,47 @@ func runServer(listen string) error {
 
 type server struct {
 	capperpb.UnimplementedCapperServer
-	clock clockwork.Clock
-	log   *slog.Logger
+	clock   clockwork.Clock
+	log     *slog.Logger
+	device  string
+	snaplen int
+	promisc bool
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
-	captureDuration := req.GetDuration().AsDuration()
-	start := s.clock.Now()
-	count := uint64(0)
-	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
-
-	device := "any"
-	snaplen := 262144
-	promisc := true
-	handle, err := newHandle(ctx, device, req.GetFilter(), snaplen, promisc)
-	if err != nil {
-		return nil, fmt.Errorf("error creating handle: %w", err)
-	}
-
-	defer func() {
-		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
-		handle.Close()
-	}()
-
 	var buf bytes.Buffer
-	pcapw := pcapgo.NewWriter(&buf)
-	if err := pcapw.WriteFileHeader(uint32(handle.SnapLen()), handle.LinkType()); err != nil {
-		return nil, fmt.Errorf("error writing file header: %w", err)
-	}
-
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.PacketsCtx(ctx) {
-		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
-			return nil, fmt.Errorf("error writing packet: %w", err)
-		}
-		count++
-		if req.GetNumPackets() != 0 && count >= req.GetNumPackets() {
-			s.log.Debug("reached num_packets limit, stopping capture", "num_packets", req.GetNumPackets())
-			break
-		}
-
-		if captureDuration != 0 && s.clock.Since(start) > captureDuration {
-			s.log.Debug("hit duration limit, stopping capture", "duration", captureDuration)
-			break
-		}
+	wh := newPacketWriterHandler(&buf)
+	pcap := newPacketCapture(s.log, wh)
+	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	if err != nil {
+		return nil, fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
 	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, err
 }
 
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
-	captureDuration := req.GetDuration().AsDuration()
-	start := s.clock.Now()
-	count := uint64(0)
-	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
 	ctx := stream.Context()
-
-	device := "any"
-	snaplen := 262144
-	promisc := true
-	handle, err := newHandle(ctx, device, req.GetFilter(), snaplen, promisc)
-	if err != nil {
-		return fmt.Errorf("error creating handle: %w", err)
-	}
-	defer func() {
-		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
-		handle.Close()
-	}()
-
 	var buf bytes.Buffer
-	pcapw := pcapgo.NewWriter(&buf)
-	if err := pcapw.WriteFileHeader(uint32(handle.SnapLen()), handle.LinkType()); err != nil {
-		return fmt.Errorf("error writing file header: %w", err)
-	}
-
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.PacketsCtx(ctx) {
-		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
-			return fmt.Errorf("error writing packet: %w", err)
+	wh := newPacketWriterHandler(&buf)
+	h := packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+		// Write the packet to the buffer
+		if err := wh.HandlePacket(h, p); err != nil {
+			return err
 		}
-		err := stream.Send(&capperpb.StreamCaptureResponse{
+		// send the packet on the stream
+		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
-		})
-		if err != nil {
-			return fmt.Errorf("error sending response: %w", err)
+		}); err != nil {
+			return fmt.Errorf("error sending packet: %w", err)
 		}
-		count++
-		buf.Reset() // reset the buffer after sending
-		if req.GetNumPackets() != 0 && count >= req.GetNumPackets() {
-			s.log.Debug("reached num_packets limit, stopping capture", "num_packets", req.GetNumPackets())
-			break
-		}
-
-		if captureDuration != 0 && s.clock.Since(start) > captureDuration {
-			s.log.Debug("hit duration limit, stopping capture", "duration", captureDuration)
-			break
-		}
+		// Reset the buffer after sending the contents
+		buf.Reset()
+		return nil
+	})
+	pcap := newPacketCapture(s.log, h)
+	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
-	return nil
+	return err
 }

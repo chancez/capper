@@ -3,12 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/pcap"
-	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +42,15 @@ var captureCmd = &cobra.Command{
 			return err
 		}
 
-		return capture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint)
+		numPackets, err := cmd.Flags().GetUint64("num-packets")
+		if err != nil {
+			return err
+		}
+		dur, err := cmd.Flags().GetDuration("duration")
+		if err != nil {
+			return err
+		}
+		return capture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint, numPackets, dur)
 	},
 }
 
@@ -53,70 +61,38 @@ func init() {
 	captureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	captureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
 	captureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
+	captureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
+	captureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
 }
 
-func newHandle(ctx context.Context, device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
-	inactive, err := pcap.NewInactiveHandle(device)
-	if err != nil {
-		return nil, err
-	}
-	defer inactive.CleanUp()
-
-	if err := inactive.SetSnapLen(snaplen); err != nil {
-		return nil, fmt.Errorf("error setting snaplen on handle: %w", err)
-	}
-
-	if err := inactive.SetPromisc(promisc); err != nil {
-		return nil, fmt.Errorf("error setting promiscuous mode on handle: %w", err)
-	}
-
-	if err := inactive.SetTimeout(time.Second); err != nil {
-		return nil, fmt.Errorf("error setting timeout on handle: %w", err)
-	}
-
-	handle, err := inactive.Activate()
-	if err != nil {
-		return nil, fmt.Errorf("error activating handle: %w", err)
-	}
-
-	if filter != "" {
-		if err := handle.SetBPFFilter(filter); err != nil {
-			return nil, fmt.Errorf("error setting filter on handle: %w", err)
-		}
-	}
-	return handle, nil
-}
-
-func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool) error {
-	handle, err := newHandle(ctx, device, filter, snaplen, promisc)
-	if err != nil {
-		return fmt.Errorf("error creating handle: %w", err)
-	}
-	defer handle.Close()
-
-	var pcapw *pcapgo.Writer
+func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
+	var wh *packetWriterHandler
 	if outputFile != "" {
 		f, err := os.Create(outputFile)
 		if err != nil {
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		pcapw = pcapgo.NewWriter(f)
-		if err := pcapw.WriteFileHeader(uint32(handle.SnapLen()), handle.LinkType()); err != nil {
-			return fmt.Errorf("error writing file header: %w", err)
-		}
+		wh = newPacketWriterHandler(f)
 	}
 
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.PacketsCtx(ctx) {
-		if pcapw == nil || alwaysPrint {
-			fmt.Println(packet)
+	handler := packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+		if wh == nil || alwaysPrint {
+			fmt.Println(p)
 		}
-		if pcapw != nil {
-			if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
-				return fmt.Errorf("error writing packet: %w", err)
+		if wh != nil {
+			// Write the packet to the file
+			if err := wh.HandlePacket(h, p); err != nil {
+				return err
 			}
 		}
+
+		return nil
+	})
+	pcap := newPacketCapture(slog.Default(), handler)
+	err := pcap.Run(ctx, device, filter, snaplen, promisc, numPackets, captureDuration)
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
 	return nil
 }
