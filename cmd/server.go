@@ -68,6 +68,7 @@ type server struct {
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
 	captureDuration := req.GetDuration().AsDuration()
 	start := s.clock.Now()
+	count := uint64(0)
 	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
 
 	device := "any"
@@ -78,7 +79,6 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		return nil, fmt.Errorf("error creating handle: %w", err)
 	}
 
-	count := uint64(0)
 	defer func() {
 		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
 		handle.Close()
@@ -96,7 +96,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 			return nil, fmt.Errorf("error writing packet: %w", err)
 		}
 		count++
-		if req.GetNumPackets() != 0 && count > req.GetNumPackets() {
+		if req.GetNumPackets() != 0 && count >= req.GetNumPackets() {
 			s.log.Debug("reached num_packets limit, stopping capture", "num_packets", req.GetNumPackets())
 			break
 		}
@@ -112,6 +112,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
 	captureDuration := req.GetDuration().AsDuration()
 	start := s.clock.Now()
+	count := uint64(0)
 	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
 	ctx := stream.Context()
 
@@ -122,7 +123,6 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
-	count := uint64(0)
 	defer func() {
 		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
 		handle.Close()
@@ -147,7 +147,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		}
 		count++
 		buf.Reset() // reset the buffer after sending
-		if req.GetNumPackets() != 0 && count > req.GetNumPackets() {
+		if req.GetNumPackets() != 0 && count >= req.GetNumPackets() {
 			s.log.Debug("reached num_packets limit, stopping capture", "num_packets", req.GetNumPackets())
 			break
 		}
