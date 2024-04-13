@@ -16,7 +16,9 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 // serverCmd represents the server command
@@ -78,9 +80,9 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	pcap := newPacketCapture(s.log, wh)
 	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
-		return nil, fmt.Errorf("error occurred while capturing packets: %w", err)
+		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
-	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, err
+	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, nil
 }
 
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
@@ -96,7 +98,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
 		}); err != nil {
-			return fmt.Errorf("error sending packet: %w", err)
+			return status.Errorf(codes.Internal, "error sending packet: %s", err)
 		}
 		// Reset the buffer after sending the contents
 		buf.Reset()
@@ -105,7 +107,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	pcap := newPacketCapture(s.log, h)
 	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
-		return fmt.Errorf("error occurred while capturing packets: %w", err)
+		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
-	return err
+	return nil
 }
