@@ -3,10 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +33,11 @@ var captureCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return capture(cmd.Context(), device, filter, snaplen, !noPromisc)
+		outputFile, err := cmd.Flags().GetString("output")
+		if err != nil {
+			return err
+		}
+		return capture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile)
 	},
 }
 
@@ -40,9 +46,10 @@ func init() {
 	captureCmd.Flags().StringP("interface", "i", "eth0", "Interface to capture packets on.")
 	captureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	captureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
+	captureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
 }
 
-func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool) error {
+func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string) error {
 	inactive, err := pcap.NewInactiveHandle(device)
 	if err != nil {
 		return err
@@ -73,9 +80,28 @@ func capture(ctx context.Context, device string, filter string, snaplen int, pro
 		}
 	}
 
+	var pcapw *pcapgo.Writer
+	if outputFile != "" {
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return fmt.Errorf("error opening output: %w", err)
+		}
+		defer f.Close()
+		pcapw = pcapgo.NewWriter(f)
+		if err := pcapw.WriteFileHeader(uint32(handle.SnapLen()), handle.LinkType()); err != nil {
+			return fmt.Errorf("error writing file header: %w", err)
+		}
+	}
+
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
-		fmt.Println(packet)
+		if pcapw != nil {
+			if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+				return fmt.Errorf("error writing packet: %w", err)
+			}
+		} else {
+			fmt.Println(packet)
+		}
 	}
 	return nil
 }
