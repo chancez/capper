@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+
+import "google/protobuf/duration.proto";
+
+package capper;
+
+option go_package = "github.com/chancez/capper/proto/capper";
+
+service Capper {
+  rpc Capture(CaptureRequest) returns (CaptureResponse) {}
+}
+
+message CaptureRequest {
+  string filter = 1;
+  uint64 num_packets = 2;
+  google.protobuf.Duration duration = 3;
+}
+
+message CaptureResponse {
+  bytes pcap = 1;
+}

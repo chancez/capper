@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ func Execute() {
 	ctx := context.Background()
 	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {
-		log.Fatalf("capper encountered an error: %s", err)
+		slog.Error("capper encountered an error", "error", err)
+		os.Exit(1)
 	}
 }
