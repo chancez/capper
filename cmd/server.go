@@ -16,9 +16,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/reflection"
-	"google.golang.org/grpc/status"
 )
 
 // serverCmd represents the server command
@@ -89,8 +87,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	count := uint64(0)
 	start := s.clock.Now()
-loop:
-	for packet := range packetSource.Packets() {
+	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
 			return nil, fmt.Errorf("error writing packet: %w", err)
 		}
@@ -103,16 +100,6 @@ loop:
 		if captureDuration != 0 && s.clock.Since(start) > captureDuration {
 			s.log.Debug("hit duration limit, stopping capture", "duration", captureDuration)
 			break
-		}
-
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
-			s.log.Debug("request cancelled, stopping capture")
-			err = status.Error(codes.Canceled, "cancelled request, returning what was captured")
-			break loop
-		default:
-			// continue
 		}
 	}
 	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, err
@@ -141,8 +128,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	count := uint64(0)
 	start := s.clock.Now()
-loop:
-	for packet := range packetSource.Packets() {
+	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
 			return fmt.Errorf("error writing packet: %w", err)
 		}
@@ -163,16 +149,6 @@ loop:
 			s.log.Debug("hit duration limit, stopping capture", "duration", captureDuration)
 			break
 		}
-
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
-			s.log.Debug("request cancelled, stopping capture")
-			err = status.Error(codes.Canceled, "cancelled request, returning what was captured")
-			break loop
-		default:
-			// continue
-		}
 	}
-	return err
+	return nil
 }

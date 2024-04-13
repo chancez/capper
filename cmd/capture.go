@@ -108,7 +108,7 @@ func capture(ctx context.Context, device string, filter string, snaplen int, pro
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
+	for packet := range packetSource.PacketsCtx(ctx) {
 		if pcapw == nil || alwaysPrint {
 			fmt.Println(packet)
 		}
