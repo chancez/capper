@@ -37,7 +37,12 @@ var captureCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return capture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile)
+		alwaysPrint, err := cmd.Flags().GetBool("print")
+		if err != nil {
+			return err
+		}
+
+		return capture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint)
 	},
 }
 
@@ -47,9 +52,10 @@ func init() {
 	captureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	captureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	captureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
+	captureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 }
 
-func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string) error {
+func capture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool) error {
 	inactive, err := pcap.NewInactiveHandle(device)
 	if err != nil {
 		return err
@@ -95,12 +101,13 @@ func capture(ctx context.Context, device string, filter string, snaplen int, pro
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
+		if pcapw == nil || alwaysPrint {
+			fmt.Println(packet)
+		}
 		if pcapw != nil {
 			if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
 				return fmt.Errorf("error writing packet: %w", err)
 			}
-		} else {
-			fmt.Println(packet)
 		}
 	}
 	return nil
