@@ -67,6 +67,7 @@ type server struct {
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
 	captureDuration := req.GetDuration().AsDuration()
+	start := s.clock.Now()
 	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
 
 	device := "any"
@@ -76,7 +77,12 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	if err != nil {
 		return nil, fmt.Errorf("error creating handle: %w", err)
 	}
-	defer handle.Close()
+
+	count := uint64(0)
+	defer func() {
+		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
+		handle.Close()
+	}()
 
 	var buf bytes.Buffer
 	pcapw := pcapgo.NewWriter(&buf)
@@ -85,8 +91,6 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	count := uint64(0)
-	start := s.clock.Now()
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
 			return nil, fmt.Errorf("error writing packet: %w", err)
@@ -107,6 +111,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
 	captureDuration := req.GetDuration().AsDuration()
+	start := s.clock.Now()
 	s.log.Debug("starting capture", "num_packets", req.GetNumPackets(), "duration", captureDuration)
 	ctx := stream.Context()
 
@@ -117,7 +122,11 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
-	defer handle.Close()
+	count := uint64(0)
+	defer func() {
+		s.log.Debug("capture finished", "packets", count, "capture_duration", s.clock.Since(start))
+		handle.Close()
+	}()
 
 	var buf bytes.Buffer
 	pcapw := pcapgo.NewWriter(&buf)
@@ -126,8 +135,6 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	count := uint64(0)
-	start := s.clock.Now()
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := pcapw.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
 			return fmt.Errorf("error writing packet: %w", err)
