@@ -7,8 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/pcap"
 	"github.com/spf13/cobra"
 )
 
@@ -67,29 +65,20 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 }
 
 func localCapture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
-	var wh *packetWriterHandler
+	var handlers []packetHandler
+	if alwaysPrint || outputFile == "" {
+		handlers = append(handlers, packetPrinterHandler)
+	}
 	if outputFile != "" {
 		f, err := os.Create(outputFile)
 		if err != nil {
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		wh = newPacketWriterHandler(f)
+		writeHandler := newPacketWriterHandler(f)
+		handlers = append(handlers, writeHandler)
 	}
-
-	handler := packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
-		if wh == nil || alwaysPrint {
-			fmt.Println(p)
-		}
-		if wh != nil {
-			// Write the packet to the file
-			if err := wh.HandlePacket(h, p); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	handler := chainPacketHandlers(handlers...)
 	pcap := newPacketCapture(slog.Default(), handler)
 	err := pcap.Run(ctx, device, filter, snaplen, promisc, numPackets, captureDuration)
 	if err != nil {

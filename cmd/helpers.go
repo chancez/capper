@@ -125,3 +125,20 @@ func (pwh *packetWriterHandler) HandlePacket(h *pcap.Handle, p gopacket.Packet) 
 	}
 	return nil
 }
+
+var packetPrinterHandler = packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+	fmt.Println(p)
+	return nil
+})
+
+func chainPacketHandlers(handlers ...packetHandler) packetHandler {
+	return packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+		for _, handler := range handlers {
+			err := handler.HandlePacket(h, p)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
