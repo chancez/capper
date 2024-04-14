@@ -128,11 +128,15 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
 
+	return handleClientStream(ctx, handler, stream)
+}
+
+func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_StreamCaptureClient) error {
 	r, w := io.Pipe()
 	var eg errgroup.Group
 
 	// Takes the incoming packet data and parses it back into a gopacket.Packet
-	// Which our handlers use to either print or write them to disk.
+	// which the PacketHandler can process.
 	eg.Go(func() error {
 		// We have to initialize this in the go routine since initializing the
 		// reader causes it to start reading from the io.Reader, trying to parse
@@ -170,7 +174,7 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 		return nil
 	})
 
-	err = eg.Wait()
+	err := eg.Wait()
 	if err != nil {
 		return err
 	}
