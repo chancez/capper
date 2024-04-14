@@ -90,14 +90,21 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	if iface == "" {
 		iface = "any"
 	}
-	ctx := stream.Context()
+	h := newStreamPacketHandler(stream)
+	pcap := capture.New(s.log, h)
+	err := pcap.Run(stream.Context(), iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	if err != nil {
+		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
+	}
+	return nil
+}
+
+// newStreamPacketHandler returns a PacketHandler which writes the packets as
+// bytes to the given Capper_StreamCaptureServer stream.
+func newStreamPacketHandler(stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
 	var buf bytes.Buffer
 	wh := capture.NewPacketWriterHandler(&buf)
-	h := capture.PacketHandlerFunc(func(h capture.PcapHandle, p gopacket.Packet) error {
-		// Write the packet to the buffer
-		if err := wh.HandlePacket(h, p); err != nil {
-			return err
-		}
+	streamH := capture.PacketHandlerFunc(func(h capture.PcapHandle, p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
@@ -108,10 +115,5 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		buf.Reset()
 		return nil
 	})
-	pcap := capture.New(s.log, h)
-	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
-	if err != nil {
-		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
-	}
-	return nil
+	return capture.ChainPacketHandlers(wh, streamH)
 }
