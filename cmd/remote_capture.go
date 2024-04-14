@@ -30,6 +30,8 @@ var remoteCaptureCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(remoteCaptureCmd)
 	remoteCaptureCmd.Flags().StringP("address", "a", "127.0.0.1:8080", "Remote capper server address to connect to")
+	remoteCaptureCmd.Flags().StringP("interface", "i", "eth0", "Interface to capture packets on.")
+	remoteCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	remoteCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
 	remoteCaptureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	remoteCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
@@ -44,6 +46,14 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		filter = args[0]
 	}
 	addr, err := cmd.Flags().GetString("address")
+	if err != nil {
+		return err
+	}
+	device, err := cmd.Flags().GetString("interface")
+	if err != nil {
+		return err
+	}
+	snaplen, err := cmd.Flags().GetInt("snaplen")
 	if err != nil {
 		return err
 	}
@@ -71,10 +81,10 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return remoteCapture(cmd.Context(), addr, connTimeout, reqTimeout, filter, outputFile, alwaysPrint, numPackets, captureDuration)
+	return remoteCapture(cmd.Context(), addr, connTimeout, reqTimeout, device, filter, snaplen, outputFile, alwaysPrint, numPackets, captureDuration)
 }
 
-func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout time.Duration, filter string, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
+func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout time.Duration, device string, filter string, snaplen int, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
@@ -92,7 +102,9 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 	c := capper.NewCapperClient(conn)
 
 	stream, err := c.StreamCapture(ctx, &capper.CaptureRequest{
+		Interface:  device,
 		Filter:     filter,
+		Snaplen:    int64(snaplen),
 		NumPackets: numPackets,
 		Duration:   durationpb.New(captureDuration),
 	})

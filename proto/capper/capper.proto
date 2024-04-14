@@ -16,6 +16,8 @@ message CaptureRequest {
   string filter = 1;
   uint64 num_packets = 2;
   google.protobuf.Duration duration = 3;
+  string interface = 4;
+  int64 snaplen = 5;
 }
 
 message CaptureResponse {

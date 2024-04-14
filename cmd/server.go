@@ -51,8 +51,6 @@ func runServer(listen string) error {
 	srv := &server{
 		clock:   clockwork.NewRealClock(),
 		log:     logger,
-		device:  "any",
-		snaplen: 262144,
 		promisc: true,
 	}
 	capperpb.RegisterCapperServer(s, srv)
@@ -68,16 +66,18 @@ type server struct {
 	capperpb.UnimplementedCapperServer
 	clock   clockwork.Clock
 	log     *slog.Logger
-	device  string
-	snaplen int
 	promisc bool
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
+	iface := req.GetInterface()
+	if iface == "" {
+		iface = "any"
+	}
 	var buf bytes.Buffer
 	wh := newPacketWriterHandler(&buf)
 	pcap := newPacketCapture(s.log, wh)
-	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -85,6 +85,10 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 }
 
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
+	iface := req.GetInterface()
+	if iface == "" {
+		iface = "any"
+	}
 	ctx := stream.Context()
 	var buf bytes.Buffer
 	wh := newPacketWriterHandler(&buf)
@@ -104,7 +108,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		return nil
 	})
 	pcap := newPacketCapture(s.log, h)
-	err := pcap.Run(ctx, s.device, req.GetFilter(), s.snaplen, s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
