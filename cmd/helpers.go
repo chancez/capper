@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jonboulle/clockwork"
@@ -51,14 +52,36 @@ type packetCapture struct {
 	handler packetHandler
 }
 
-type packetHandler interface {
-	HandlePacket(*pcap.Handle, gopacket.Packet) error
+type pcapHandle interface {
+	LinkType() layers.LinkType
+	Snaplen() uint32
 }
 
-type packetHandlerFunc func(*pcap.Handle, gopacket.Packet) error
+type packetHandler interface {
+	HandlePacket(pcapHandle, gopacket.Packet) error
+}
 
-func (f packetHandlerFunc) HandlePacket(h *pcap.Handle, p gopacket.Packet) error {
+type packetHandlerFunc func(pcapHandle, gopacket.Packet) error
+
+func (f packetHandlerFunc) HandlePacket(h pcapHandle, p gopacket.Packet) error {
 	return f(h, p)
+}
+
+// pcapHandleWrapper wraps a *pcap.Handle so it satifies the pcapHandle interface.
+// *pcap.Handle and *pcapgo.Reader have similar but different method signatures for Snaplen().
+// This wrapper type handles the discrepency so we can have a single interface
+// to use with the packetHandler.HandlePacket method.
+type pcapHandleWrapper struct {
+	handle *pcap.Handle
+}
+
+func (h *pcapHandleWrapper) LinkType() layers.LinkType {
+	return h.handle.LinkType()
+
+}
+
+func (h *pcapHandleWrapper) Snaplen() uint32 {
+	return uint32(h.handle.SnapLen())
 }
 
 func newPacketCapture(log *slog.Logger, handler packetHandler) *packetCapture {
@@ -82,10 +105,11 @@ func (c *packetCapture) Run(ctx context.Context, device string, filter string, s
 		c.log.Debug("capture finished", "packets", count, "capture_duration", c.clock.Since(start))
 		handle.Close()
 	}()
+	handleWrapper := &pcapHandleWrapper{handle: handle}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.PacketsCtx(ctx) {
-		err := c.handler.HandlePacket(handle, packet)
+		err := c.handler.HandlePacket(handleWrapper, packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
 		}
@@ -112,9 +136,9 @@ func newPacketWriterHandler(w io.Writer) *packetWriterHandler {
 	return &packetWriterHandler{pcapWriter: pcapgo.NewWriter(w)}
 }
 
-func (pwh *packetWriterHandler) HandlePacket(h *pcap.Handle, p gopacket.Packet) error {
+func (pwh *packetWriterHandler) HandlePacket(h pcapHandle, p gopacket.Packet) error {
 	if !pwh.headerWritten {
-		if err := pwh.pcapWriter.WriteFileHeader(uint32(h.SnapLen()), h.LinkType()); err != nil {
+		if err := pwh.pcapWriter.WriteFileHeader(uint32(h.Snaplen()), h.LinkType()); err != nil {
 			return fmt.Errorf("error writing file header: %w", err)
 		}
 		pwh.headerWritten = true
@@ -126,13 +150,13 @@ func (pwh *packetWriterHandler) HandlePacket(h *pcap.Handle, p gopacket.Packet) 
 	return nil
 }
 
-var packetPrinterHandler = packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+var packetPrinterHandler = packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
 	fmt.Println(p)
 	return nil
 })
 
 func chainPacketHandlers(handlers ...packetHandler) packetHandler {
-	return packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+	return packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
 		for _, handler := range handlers {
 			err := handler.HandlePacket(h, p)
 			if err != nil {

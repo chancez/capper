@@ -100,39 +100,42 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	var out *os.File
+	var handlers []packetHandler
+	if alwaysPrint || outputFile == "" {
+		handlers = append(handlers, packetPrinterHandler)
+	}
 	if outputFile != "" {
-		out, err = os.Create(outputFile)
+		f, err := os.Create(outputFile)
 		if err != nil {
 			return fmt.Errorf("error opening output: %w", err)
 		}
-		defer out.Close()
+		defer f.Close()
+		writeHandler := newPacketWriterHandler(f)
+		handlers = append(handlers, writeHandler)
 	}
+	handler := chainPacketHandlers(handlers...)
 
 	r, w := io.Pipe()
-	var pcapReader *pcapgo.Reader
-	var packetSource *gopacket.PacketSource
 	var eg errgroup.Group
 
+	// Takes the incoming packet data and parses it back into a gopacket.Packet
+	// Which our handlers use to either print or write them to disk.
 	eg.Go(func() error {
-		if pcapReader == nil {
-			// We have to initialize this in the go routine since initializing the
-			// reader causes it to start reading from the io.Reader, trying to parse
-			// the pcap header.
-			pcapReader, err = pcapgo.NewReader(r)
-			if err != nil {
-				return fmt.Errorf("error creating pcap reader: %w", err)
-			}
+		// We have to initialize this in the go routine since initializing the
+		// reader causes it to start reading from the io.Reader, trying to parse
+		// the pcap header.
+		pcapReader, err := pcapgo.NewReader(r)
+		if err != nil {
+			return fmt.Errorf("error creating pcap reader: %w", err)
 		}
-		packetSource = gopacket.NewPacketSource(pcapReader, pcapReader.LinkType())
+		packetSource := gopacket.NewPacketSource(pcapReader, pcapReader.LinkType())
 		for packet := range packetSource.PacketsCtx(ctx) {
-			if alwaysPrint || outputFile == "" {
-				fmt.Println(packet)
-			}
+			handler.HandlePacket(pcapReader, packet)
 		}
 		return nil
 	})
 
+	// Read packets from the gRPC stream and send them to the reader go routine started above.
 	eg.Go(func() error {
 		defer w.Close()
 		for {
@@ -149,13 +152,6 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 			_, err = w.Write(resp.GetData())
 			if err != nil {
 				return fmt.Errorf("error writing data to buffer: %w", err)
-			}
-			if out != nil {
-				// TODO(chance): Check how many bytes were written
-				_, err := out.Write(resp.GetData())
-				if err != nil {
-					return fmt.Errorf("error writing file: %w", err)
-				}
 			}
 		}
 		return nil

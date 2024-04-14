@@ -12,7 +12,6 @@ import (
 
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/pcap"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -89,7 +88,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	ctx := stream.Context()
 	var buf bytes.Buffer
 	wh := newPacketWriterHandler(&buf)
-	h := packetHandlerFunc(func(h *pcap.Handle, p gopacket.Packet) error {
+	h := packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
 		// Write the packet to the buffer
 		if err := wh.HandlePacket(h, p); err != nil {
 			return err
