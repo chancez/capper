@@ -1,10 +1,11 @@
-package cmd
+package capture
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/gopacket/gopacket"
@@ -14,7 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-func newHandle(device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
+func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
 	inactive, err := pcap.NewInactiveHandle(device)
 	if err != nil {
 		return nil, err
@@ -46,24 +47,24 @@ func newHandle(device string, filter string, snaplen int, promisc bool) (*pcap.H
 	return handle, nil
 }
 
-type packetCapture struct {
+type PacketCapture struct {
 	clock   clockwork.Clock
 	log     *slog.Logger
-	handler packetHandler
+	handler PacketHandler
 }
 
-type pcapHandle interface {
+type PcapHandle interface {
 	LinkType() layers.LinkType
 	Snaplen() uint32
 }
 
-type packetHandler interface {
-	HandlePacket(pcapHandle, gopacket.Packet) error
+type PacketHandler interface {
+	HandlePacket(PcapHandle, gopacket.Packet) error
 }
 
-type packetHandlerFunc func(pcapHandle, gopacket.Packet) error
+type PacketHandlerFunc func(PcapHandle, gopacket.Packet) error
 
-func (f packetHandlerFunc) HandlePacket(h pcapHandle, p gopacket.Packet) error {
+func (f PacketHandlerFunc) HandlePacket(h PcapHandle, p gopacket.Packet) error {
 	return f(h, p)
 }
 
@@ -84,20 +85,20 @@ func (h *pcapHandleWrapper) Snaplen() uint32 {
 	return uint32(h.handle.SnapLen())
 }
 
-func newPacketCapture(log *slog.Logger, handler packetHandler) *packetCapture {
-	return &packetCapture{
+func New(log *slog.Logger, handler PacketHandler) *PacketCapture {
+	return &PacketCapture{
 		clock:   clockwork.NewRealClock(),
 		log:     log,
 		handler: handler,
 	}
 }
 
-func (c *packetCapture) Run(ctx context.Context, device string, filter string, snaplen int, promisc bool, numPackets uint64, captureDuration time.Duration) error {
+func (c *PacketCapture) Run(ctx context.Context, device string, filter string, snaplen int, promisc bool, numPackets uint64, captureDuration time.Duration) error {
 	start := c.clock.Now()
 	count := uint64(0)
 	c.log.Debug("starting capture", "num_packets", numPackets, "duration", captureDuration)
 
-	handle, err := newHandle(device, filter, snaplen, promisc)
+	handle, err := NewLiveHandle(device, filter, snaplen, promisc)
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
@@ -127,16 +128,16 @@ func (c *packetCapture) Run(ctx context.Context, device string, filter string, s
 	return nil
 }
 
-type packetWriterHandler struct {
+type PacketWriterHandler struct {
 	pcapWriter    *pcapgo.Writer
 	headerWritten bool
 }
 
-func newPacketWriterHandler(w io.Writer) *packetWriterHandler {
-	return &packetWriterHandler{pcapWriter: pcapgo.NewWriter(w)}
+func NewPacketWriterHandler(w io.Writer) *PacketWriterHandler {
+	return &PacketWriterHandler{pcapWriter: pcapgo.NewWriter(w)}
 }
 
-func (pwh *packetWriterHandler) HandlePacket(h pcapHandle, p gopacket.Packet) error {
+func (pwh *PacketWriterHandler) HandlePacket(h PcapHandle, p gopacket.Packet) error {
 	if !pwh.headerWritten {
 		if err := pwh.pcapWriter.WriteFileHeader(uint32(h.Snaplen()), h.LinkType()); err != nil {
 			return fmt.Errorf("error writing file header: %w", err)
@@ -150,13 +151,13 @@ func (pwh *packetWriterHandler) HandlePacket(h pcapHandle, p gopacket.Packet) er
 	return nil
 }
 
-var packetPrinterHandler = packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
+var PacketPrinterHandler = PacketHandlerFunc(func(h PcapHandle, p gopacket.Packet) error {
 	fmt.Println(p)
 	return nil
 })
 
-func chainPacketHandlers(handlers ...packetHandler) packetHandler {
-	return packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
+func ChainPacketHandlers(handlers ...PacketHandler) PacketHandler {
+	return PacketHandlerFunc(func(h PcapHandle, p gopacket.Packet) error {
 		for _, handler := range handlers {
 			err := handler.HandlePacket(h, p)
 			if err != nil {
@@ -165,4 +166,27 @@ func chainPacketHandlers(handlers ...packetHandler) packetHandler {
 		}
 		return nil
 	})
+}
+
+func Local(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
+	var handlers []PacketHandler
+	if alwaysPrint || outputFile == "" {
+		handlers = append(handlers, PacketPrinterHandler)
+	}
+	if outputFile != "" {
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return fmt.Errorf("error opening output: %w", err)
+		}
+		defer f.Close()
+		writeHandler := NewPacketWriterHandler(f)
+		handlers = append(handlers, writeHandler)
+	}
+	handler := ChainPacketHandlers(handlers...)
+	pcap := New(slog.Default(), handler)
+	err := pcap.Run(ctx, device, filter, snaplen, promisc, numPackets, captureDuration)
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
+	}
+	return nil
 }

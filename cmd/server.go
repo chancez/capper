@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/jonboulle/clockwork"
@@ -75,8 +76,8 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		iface = "any"
 	}
 	var buf bytes.Buffer
-	wh := newPacketWriterHandler(&buf)
-	pcap := newPacketCapture(s.log, wh)
+	wh := capture.NewPacketWriterHandler(&buf)
+	pcap := capture.New(s.log, wh)
 	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
@@ -91,8 +92,8 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	}
 	ctx := stream.Context()
 	var buf bytes.Buffer
-	wh := newPacketWriterHandler(&buf)
-	h := packetHandlerFunc(func(h pcapHandle, p gopacket.Packet) error {
+	wh := capture.NewPacketWriterHandler(&buf)
+	h := capture.PacketHandlerFunc(func(h capture.PcapHandle, p gopacket.Packet) error {
 		// Write the packet to the buffer
 		if err := wh.HandlePacket(h, p); err != nil {
 			return err
@@ -107,7 +108,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		buf.Reset()
 		return nil
 	})
-	pcap := newPacketCapture(s.log, h)
+	pcap := capture.New(s.log, h)
 	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)

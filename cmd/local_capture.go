@@ -1,12 +1,7 @@
 package cmd
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"os"
-	"time"
-
+	"github.com/chancez/capper/pkg/capture"
 	"github.com/spf13/cobra"
 )
 
@@ -61,28 +56,5 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return localCapture(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint, numPackets, dur)
-}
-
-func localCapture(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
-	var handlers []packetHandler
-	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, packetPrinterHandler)
-	}
-	if outputFile != "" {
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return fmt.Errorf("error opening output: %w", err)
-		}
-		defer f.Close()
-		writeHandler := newPacketWriterHandler(f)
-		handlers = append(handlers, writeHandler)
-	}
-	handler := chainPacketHandlers(handlers...)
-	pcap := newPacketCapture(slog.Default(), handler)
-	err := pcap.Run(ctx, device, filter, snaplen, promisc, numPackets, captureDuration)
-	if err != nil {
-		return fmt.Errorf("error occurred while capturing packets: %w", err)
-	}
-	return nil
+	return capture.Local(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint, numPackets, dur)
 }

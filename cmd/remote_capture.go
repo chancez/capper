@@ -8,7 +8,8 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/chancez/capper/proto/capper"
+	"github.com/chancez/capper/pkg/capture"
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/spf13/cobra"
@@ -99,9 +100,9 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 		return fmt.Errorf("error connecting to server: %w", err)
 	}
 	defer conn.Close()
-	c := capper.NewCapperClient(conn)
+	c := capperpb.NewCapperClient(conn)
 
-	stream, err := c.StreamCapture(ctx, &capper.CaptureRequest{
+	stream, err := c.StreamCapture(ctx, &capperpb.CaptureRequest{
 		Interface:  device,
 		Filter:     filter,
 		Snaplen:    int64(snaplen),
@@ -112,9 +113,9 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	var handlers []packetHandler
+	var handlers []capture.PacketHandler
 	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, packetPrinterHandler)
+		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputFile != "" {
 		f, err := os.Create(outputFile)
@@ -122,10 +123,10 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := newPacketWriterHandler(f)
+		writeHandler := capture.NewPacketWriterHandler(f)
 		handlers = append(handlers, writeHandler)
 	}
-	handler := chainPacketHandlers(handlers...)
+	handler := capture.ChainPacketHandlers(handlers...)
 
 	r, w := io.Pipe()
 	var eg errgroup.Group
