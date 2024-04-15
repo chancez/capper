@@ -148,7 +148,9 @@ func handleClientStream(ctx context.Context, handler capture.PacketHandler, stre
 		}
 		packetSource := gopacket.NewPacketSource(pcapReader, pcapReader.LinkType())
 		for packet := range packetSource.PacketsCtx(ctx) {
-			handler.HandlePacket(packet)
+			if err := handler.HandlePacket(packet); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
