@@ -84,7 +84,7 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 	eg, ctx := errgroup.WithContext(streamCtx)
 
 	drainHeapSize := 10 * len(s.peers)
-	flushInterval := 2 * time.Second
+	flushInterval := time.Duration(2*len(s.peers)) * time.Second
 
 	// Use a buffered channel so that we can continue to receive packets from peers while merging
 	peerPackets := make(chan gopacket.Packet, len(s.peers))
@@ -131,19 +131,19 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 					sent++
 				}
 				if sent > 0 {
-					s.log.Debug("flushed packets", "num_packets", sent)
+					s.log.Debug("reached drainHeapSize: flushed packets", "num_packets", sent, "drainHeapSize", drainHeapSize, "heapSize", len(packetHeap))
 					// Reset the ticker if we recently sent new packets
 					ticker.Reset(flushInterval)
 				}
 			case <-ticker.C:
 				// Send 1/2 the heap if we haven't sent anything in a while
 				sent := 0
-				for ; sent <= len(packetHeap)/2; sent++ {
+				for ; sent < len(packetHeap)/2 || len(packetHeap) == 1; sent++ {
 					if err := sendPacket(); err != nil {
 						return err
 					}
 				}
-				s.log.Debug("flushed packets", "num_packets", sent)
+				s.log.Debug("reached flushInterval: flushed packets", "num_packets", sent, "flushInterval", flushInterval, "heapSize", len(packetHeap))
 			}
 		}
 	})
