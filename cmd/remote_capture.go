@@ -11,6 +11,7 @@ import (
 	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -123,7 +124,7 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f)
+		writeHandler := capture.NewPacketWriterHandler(f, uint32(snaplen), layers.LinkTypeEthernet)
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
@@ -147,7 +148,7 @@ func handleClientStream(ctx context.Context, handler capture.PacketHandler, stre
 		}
 		packetSource := gopacket.NewPacketSource(pcapReader, pcapReader.LinkType())
 		for packet := range packetSource.PacketsCtx(ctx) {
-			handler.HandlePacket(pcapReader, packet)
+			handler.HandlePacket(packet)
 		}
 		return nil
 	})

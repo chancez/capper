@@ -39,6 +39,10 @@ func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pc
 		return nil, fmt.Errorf("error activating handle: %w", err)
 	}
 
+	if err := handle.SetLinkType(layers.LinkTypeEthernet); err != nil {
+		return nil, fmt.Errorf("error setting link type on handle: %w", err)
+	}
+
 	if filter != "" {
 		if err := handle.SetBPFFilter(filter); err != nil {
 			return nil, fmt.Errorf("error setting filter on handle: %w", err)
@@ -53,36 +57,14 @@ type PacketCapture struct {
 	handler PacketHandler
 }
 
-type PcapHandle interface {
-	LinkType() layers.LinkType
-	Snaplen() uint32
-}
-
 type PacketHandler interface {
-	HandlePacket(PcapHandle, gopacket.Packet) error
+	HandlePacket(gopacket.Packet) error
 }
 
-type PacketHandlerFunc func(PcapHandle, gopacket.Packet) error
+type PacketHandlerFunc func(gopacket.Packet) error
 
-func (f PacketHandlerFunc) HandlePacket(h PcapHandle, p gopacket.Packet) error {
-	return f(h, p)
-}
-
-// pcapHandleWrapper wraps a *pcap.Handle so it satifies the pcapHandle interface.
-// *pcap.Handle and *pcapgo.Reader have similar but different method signatures for Snaplen().
-// This wrapper type handles the discrepency so we can have a single interface
-// to use with the packetHandler.HandlePacket method.
-type pcapHandleWrapper struct {
-	handle *pcap.Handle
-}
-
-func (h *pcapHandleWrapper) LinkType() layers.LinkType {
-	return h.handle.LinkType()
-
-}
-
-func (h *pcapHandleWrapper) Snaplen() uint32 {
-	return uint32(h.handle.SnapLen())
+func (f PacketHandlerFunc) HandlePacket(p gopacket.Packet) error {
+	return f(p)
 }
 
 func New(log *slog.Logger, handler PacketHandler) *PacketCapture {
@@ -106,11 +88,10 @@ func (c *PacketCapture) Run(ctx context.Context, device string, filter string, s
 		c.log.Debug("capture finished", "packets", count, "capture_duration", c.clock.Since(start))
 		handle.Close()
 	}()
-	handleWrapper := &pcapHandleWrapper{handle: handle}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.PacketsCtx(ctx) {
-		err := c.handler.HandlePacket(handleWrapper, packet)
+		err := c.handler.HandlePacket(packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
 		}
@@ -131,15 +112,21 @@ func (c *PacketCapture) Run(ctx context.Context, device string, filter string, s
 type PacketWriterHandler struct {
 	pcapWriter    *pcapgo.Writer
 	headerWritten bool
+	snaplen       uint32
+	linkType      layers.LinkType
 }
 
-func NewPacketWriterHandler(w io.Writer) *PacketWriterHandler {
-	return &PacketWriterHandler{pcapWriter: pcapgo.NewWriter(w)}
+func NewPacketWriterHandler(w io.Writer, snaplen uint32, linkType layers.LinkType) *PacketWriterHandler {
+	return &PacketWriterHandler{
+		pcapWriter: pcapgo.NewWriter(w),
+		snaplen:    snaplen,
+		linkType:   linkType,
+	}
 }
 
-func (pwh *PacketWriterHandler) HandlePacket(h PcapHandle, p gopacket.Packet) error {
+func (pwh *PacketWriterHandler) HandlePacket(p gopacket.Packet) error {
 	if !pwh.headerWritten {
-		if err := pwh.pcapWriter.WriteFileHeader(uint32(h.Snaplen()), h.LinkType()); err != nil {
+		if err := pwh.pcapWriter.WriteFileHeader(pwh.snaplen, pwh.linkType); err != nil {
 			return fmt.Errorf("error writing file header: %w", err)
 		}
 		pwh.headerWritten = true
@@ -151,15 +138,15 @@ func (pwh *PacketWriterHandler) HandlePacket(h PcapHandle, p gopacket.Packet) er
 	return nil
 }
 
-var PacketPrinterHandler = PacketHandlerFunc(func(h PcapHandle, p gopacket.Packet) error {
+var PacketPrinterHandler = PacketHandlerFunc(func(p gopacket.Packet) error {
 	fmt.Println(p)
 	return nil
 })
 
 func ChainPacketHandlers(handlers ...PacketHandler) PacketHandler {
-	return PacketHandlerFunc(func(h PcapHandle, p gopacket.Packet) error {
+	return PacketHandlerFunc(func(p gopacket.Packet) error {
 		for _, handler := range handlers {
-			err := handler.HandlePacket(h, p)
+			err := handler.HandlePacket(p)
 			if err != nil {
 				return err
 			}
@@ -179,7 +166,7 @@ func Local(ctx context.Context, device string, filter string, snaplen int, promi
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := NewPacketWriterHandler(f)
+		writeHandler := NewPacketWriterHandler(f, uint32(snaplen), layers.LinkTypeEthernet)
 		handlers = append(handlers, writeHandler)
 	}
 	handler := ChainPacketHandlers(handlers...)

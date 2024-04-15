@@ -13,6 +13,7 @@ import (
 	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -76,7 +77,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		iface = "any"
 	}
 	var buf bytes.Buffer
-	wh := capture.NewPacketWriterHandler(&buf)
+	wh := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
 	pcap := capture.New(s.log, wh)
 	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
@@ -90,7 +91,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 	if iface == "" {
 		iface = "any"
 	}
-	h := newStreamPacketHandler(stream)
+	h := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
 	pcap := capture.New(s.log, h)
 	err := pcap.Run(stream.Context(), iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
@@ -101,10 +102,10 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_StreamCaptureServer stream.
-func newStreamPacketHandler(stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
+func newStreamPacketHandler(snaplen uint32, linkType layers.LinkType, stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
 	var buf bytes.Buffer
-	wh := capture.NewPacketWriterHandler(&buf)
-	streamH := capture.PacketHandlerFunc(func(h capture.PcapHandle, p gopacket.Packet) error {
+	wh := capture.NewPacketWriterHandler(&buf, snaplen, linkType)
+	streamH := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
