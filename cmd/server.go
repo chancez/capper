@@ -72,6 +72,8 @@ type server struct {
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
+	s.log.Debug("Capture Started")
+	defer s.log.Debug("Capture finished")
 	iface := req.GetInterface()
 	if iface == "" {
 		iface = "any"
@@ -87,6 +89,8 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 }
 
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
+	s.log.Debug("StreamCapture Started")
+	defer s.log.Debug("StreamCapture finished")
 	iface := req.GetInterface()
 	if iface == "" {
 		iface = "any"
