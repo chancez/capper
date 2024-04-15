@@ -103,7 +103,13 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 	defer conn.Close()
 	c := capperpb.NewCapperClient(conn)
 
-	stream, err := c.StreamCapture(ctx, &capperpb.CaptureRequest{
+	reqCtx := ctx
+	reqCancel := func() {}
+	if reqTimeout != 0 {
+		reqCtx, reqCancel = context.WithTimeout(ctx, reqTimeout)
+		defer reqCancel()
+	}
+	stream, err := c.StreamCapture(reqCtx, &capperpb.CaptureRequest{
 		Interface:  device,
 		Filter:     filter,
 		Snaplen:    int64(snaplen),
