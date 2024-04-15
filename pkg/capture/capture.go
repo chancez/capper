@@ -89,8 +89,15 @@ func (c *PacketCapture) Run(ctx context.Context, device string, filter string, s
 		handle.Close()
 	}()
 
+	packetsCtx := ctx
+	if captureDuration > 0 {
+		var packetsCancel context.CancelFunc
+		packetsCtx, packetsCancel = context.WithTimeout(ctx, captureDuration)
+		defer packetsCancel()
+	}
+
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.PacketsCtx(ctx) {
+	for packet := range packetSource.PacketsCtx(packetsCtx) {
 		err := c.handler.HandlePacket(packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
@@ -98,11 +105,6 @@ func (c *PacketCapture) Run(ctx context.Context, device string, filter string, s
 		count++
 		if numPackets != 0 && count >= numPackets {
 			c.log.Debug("reached num_packets limit, stopping capture", "num_packets", numPackets)
-			break
-		}
-
-		if captureDuration != 0 && c.clock.Since(start) >= captureDuration {
-			c.log.Debug("hit duration limit, stopping capture", "duration", captureDuration)
 			break
 		}
 	}
