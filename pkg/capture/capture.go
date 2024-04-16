@@ -78,14 +78,14 @@ func New(log *slog.Logger, handler PacketHandler) *PacketCapture {
 func (c *PacketCapture) Run(ctx context.Context, device string, filter string, snaplen int, promisc bool, numPackets uint64, captureDuration time.Duration) error {
 	start := c.clock.Now()
 	count := uint64(0)
-	c.log.Debug("starting capture", "num_packets", numPackets, "duration", captureDuration)
+	c.log.Debug("starting capture", "interface", device, "num_packets", numPackets, "duration", captureDuration)
 
 	handle, err := NewLiveHandle(device, filter, snaplen, promisc)
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
 	defer func() {
-		c.log.Debug("capture finished", "packets", count, "capture_duration", c.clock.Since(start))
+		c.log.Debug("capture finished", "interface", device, "packets", count, "capture_duration", c.clock.Since(start))
 		handle.Close()
 	}()
 
