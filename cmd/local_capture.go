@@ -14,7 +14,7 @@ var localCaptureCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(localCaptureCmd)
-	localCaptureCmd.Flags().StringP("interface", "i", "eth0", "Interface to capture packets on.")
+	localCaptureCmd.Flags().StringP("interface", "i", "", "Interface to capture packets on.")
 	localCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	localCaptureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	localCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")

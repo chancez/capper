@@ -2,9 +2,11 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"time"
 
@@ -72,6 +74,19 @@ func New(log *slog.Logger, handler PacketHandler) *PacketCapture {
 }
 
 func (c *PacketCapture) Run(ctx context.Context, device string, filter string, snaplen int, promisc bool, numPackets uint64, captureDuration time.Duration) error {
+	if device == "" {
+		c.log.Debug("interface not specified, using first interface")
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			return fmt.Errorf("error listing network interfaces: %w", err)
+		}
+		if len(ifaces) == 0 {
+			return errors.New("host has no interfaces")
+
+		}
+		device = ifaces[0].Name
+	}
+
 	start := c.clock.Now()
 	count := uint64(0)
 	c.log.Debug("starting capture", "interface", device, "num_packets", numPackets, "duration", captureDuration)

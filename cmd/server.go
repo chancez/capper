@@ -73,27 +73,19 @@ type server struct {
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
-	iface := req.GetInterface()
-	if iface == "" {
-		iface = "any"
-	}
 	var buf bytes.Buffer
 	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
 	pcap := capture.New(s.log, writeHandler)
-	err := pcap.Run(ctx, iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	err := pcap.Run(ctx, req.GetInterface(), req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
 	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, nil
 }
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
-	iface := req.GetInterface()
-	if iface == "" {
-		iface = "any"
-	}
 	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
 	pcap := capture.New(s.log, streamHandler)
-	err := pcap.Run(stream.Context(), iface, req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
+	err := pcap.Run(stream.Context(), req.GetInterface(), req.GetFilter(), int(req.GetSnaplen()), s.promisc, req.GetNumPackets(), req.GetDuration().AsDuration())
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
