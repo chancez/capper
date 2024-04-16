@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
@@ -141,6 +143,7 @@ func newGRPCServer(logger *slog.Logger, capperSrv capperpb.CapperServer) *grpc.S
 	)
 
 	capperpb.RegisterCapperServer(s, capperSrv)
+	healthpb.RegisterHealthServer(s, health.NewServer())
 	reflection.Register(s)
 	return s
 }
