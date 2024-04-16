@@ -1,10 +1,14 @@
 GO := go
+GO_LINKER_FLAGS ?=
+GO_BUILD_FLAGS ?=
+IMAGE_TAG := latest
+DOCKER_FLAGS ?=
 
 all: proto capper
 
 .PHONY: capper
 capper:
-	$(GO) build -o capper .
+	$(GO) build --ldflags='$(GO_LINKER_FLAGS)' $(GO_BUILD_FLAGS) -o capper .
 
 .PHONY: proto
 proto:
@@ -14,3 +18,6 @@ proto:
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=. \
 		proto/capper/capper.proto
+
+image:
+	docker build $(DOCKER_FLAGS) -t ghcr.io/chancez/capper:$(IMAGE_TAG) .
