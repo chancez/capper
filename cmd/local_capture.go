@@ -1,7 +1,13 @@
 package cmd
 
 import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+
 	"github.com/chancez/capper/pkg/capture"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/spf13/cobra"
 )
 
@@ -56,5 +62,40 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return capture.Local(cmd.Context(), device, filter, snaplen, !noPromisc, outputFile, alwaysPrint, numPackets, dur)
+	conf := capture.Config{
+		Interface:       device,
+		Filter:          filter,
+		Snaplen:         snaplen,
+		Promisc:         !noPromisc,
+		NumPackets:      numPackets,
+		CaptureDuration: dur,
+	}
+	log := slog.Default()
+	return localCapture(cmd.Context(), log, conf, outputFile, alwaysPrint)
+}
+
+// localCapture runs a packet capture and stores the output to the specified file or
+// logs the packets to stdout with the configured logger if outputFile is
+// empty.
+// If alwaysPrint is true; it prints regardless whether outputFile is empty.
+func localCapture(ctx context.Context, log *slog.Logger, conf capture.Config, outputFile string, alwaysPrint bool) error {
+	var handlers []capture.PacketHandler
+	if alwaysPrint || outputFile == "" {
+		handlers = append(handlers, capture.PacketPrinterHandler)
+	}
+	if outputFile != "" {
+		f, err := os.Create(outputFile)
+		if err != nil {
+			return fmt.Errorf("error opening output: %w", err)
+		}
+		defer f.Close()
+		writeHandler := capture.NewPacketWriterHandler(f, uint32(conf.Snaplen), layers.LinkTypeEthernet)
+		handlers = append(handlers, writeHandler)
+	}
+	handler := capture.ChainPacketHandlers(handlers...)
+	err := capture.Run(ctx, log, conf, handler)
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
+	}
+	return nil
 }

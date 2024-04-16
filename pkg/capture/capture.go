@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"os"
 	"time"
 
 	"github.com/gopacket/gopacket"
@@ -49,10 +48,13 @@ func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pc
 	return handle, nil
 }
 
-type PacketCapture struct {
-	clock   clockwork.Clock
-	log     *slog.Logger
-	handler PacketHandler
+type Config struct {
+	Interface       string
+	Filter          string
+	Snaplen         int
+	Promisc         bool
+	NumPackets      uint64
+	CaptureDuration time.Duration
 }
 
 type PacketHandler interface {
@@ -65,17 +67,12 @@ func (f PacketHandlerFunc) HandlePacket(p gopacket.Packet) error {
 	return f(p)
 }
 
-func New(log *slog.Logger, handler PacketHandler) *PacketCapture {
-	return &PacketCapture{
-		clock:   clockwork.NewRealClock(),
-		log:     log,
-		handler: handler,
-	}
-}
+func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandler) error {
+	clock := clockwork.NewRealClock()
 
-func (c *PacketCapture) Run(ctx context.Context, device string, filter string, snaplen int, promisc bool, numPackets uint64, captureDuration time.Duration) error {
+	device := conf.Interface
 	if device == "" {
-		c.log.Debug("interface not specified, using first interface")
+		log.Debug("interface not specified, using first interface")
 		ifaces, err := net.Interfaces()
 		if err != nil {
 			return fmt.Errorf("error listing network interfaces: %w", err)
@@ -87,35 +84,35 @@ func (c *PacketCapture) Run(ctx context.Context, device string, filter string, s
 		device = ifaces[0].Name
 	}
 
-	start := c.clock.Now()
+	start := clock.Now()
 	count := uint64(0)
-	c.log.Debug("starting capture", "interface", device, "num_packets", numPackets, "duration", captureDuration)
+	log.Debug("starting capture", "interface", device, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 
-	handle, err := NewLiveHandle(device, filter, snaplen, promisc)
+	handle, err := NewLiveHandle(device, conf.Filter, conf.Snaplen, conf.Promisc)
 	if err != nil {
 		return fmt.Errorf("error creating handle: %w", err)
 	}
 	defer func() {
-		c.log.Debug("capture finished", "interface", device, "packets", count, "capture_duration", c.clock.Since(start))
+		log.Debug("capture finished", "interface", device, "packets", count, "capture_duration", clock.Since(start))
 		handle.Close()
 	}()
 
 	packetsCtx := ctx
-	if captureDuration > 0 {
+	if conf.CaptureDuration > 0 {
 		var packetsCancel context.CancelFunc
-		packetsCtx, packetsCancel = context.WithTimeout(ctx, captureDuration)
+		packetsCtx, packetsCancel = context.WithTimeout(ctx, conf.CaptureDuration)
 		defer packetsCancel()
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
-		err := c.handler.HandlePacket(packet)
+		err := handler.HandlePacket(packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
 		}
 		count++
-		if numPackets != 0 && count >= numPackets {
-			c.log.Debug("reached num_packets limit, stopping capture", "num_packets", numPackets)
+		if conf.NumPackets != 0 && count >= conf.NumPackets {
+			log.Debug("reached num_packets limit, stopping capture", "num_packets", conf.NumPackets)
 			break
 		}
 	}
@@ -166,27 +163,4 @@ func ChainPacketHandlers(handlers ...PacketHandler) PacketHandler {
 		}
 		return nil
 	})
-}
-
-func Local(ctx context.Context, device string, filter string, snaplen int, promisc bool, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
-	var handlers []PacketHandler
-	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, PacketPrinterHandler)
-	}
-	if outputFile != "" {
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return fmt.Errorf("error opening output: %w", err)
-		}
-		defer f.Close()
-		writeHandler := NewPacketWriterHandler(f, uint32(snaplen), layers.LinkTypeEthernet)
-		handlers = append(handlers, writeHandler)
-	}
-	handler := ChainPacketHandlers(handlers...)
-	pcap := New(slog.Default(), handler)
-	err := pcap.Run(ctx, device, filter, snaplen, promisc, numPackets, captureDuration)
-	if err != nil {
-		return fmt.Errorf("error occurred while capturing packets: %w", err)
-	}
-	return nil
 }
