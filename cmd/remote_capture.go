@@ -31,7 +31,7 @@ var remoteCaptureCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(remoteCaptureCmd)
-	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:8080", "Remote capper server address to connect to")
+	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
 	remoteCaptureCmd.Flags().StringP("interface", "i", "eth0", "Interface to capture packets on.")
 	remoteCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	remoteCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")

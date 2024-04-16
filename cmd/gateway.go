@@ -40,7 +40,7 @@ var gatewayCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(gatewayCmd)
-	gatewayCmd.Flags().String("listen-address", "127.0.0.1:8080", "Gateway listen address")
+	gatewayCmd.Flags().String("listen-address", "127.0.0.1:48999", "Gateway listen address")
 	gatewayCmd.Flags().StringSlice("peers", []string{}, "List of peers")
 }
 

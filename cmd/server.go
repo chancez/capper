@@ -38,7 +38,7 @@ var serverCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.Flags().String("listen-address", "127.0.0.1:8080", "Server listen address")
+	serverCmd.Flags().String("listen-address", "127.0.0.1:48999", "Server listen address")
 }
 
 func runServer(listen string) error {
