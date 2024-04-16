@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // gatewayCmd represents the gateway command
@@ -78,11 +81,26 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 	streamCtx := stream.Context()
 	eg, ctx := errgroup.WithContext(streamCtx)
 
-	drainHeapSize := 10 * len(s.peers)
-	flushInterval := time.Duration(2*len(s.peers)) * time.Second
+	var peers []string
+	for _, p := range s.peers {
+		if strings.HasPrefix(p, "dnssrv+") {
+			query := strings.TrimPrefix(p, "dnssrv+")
+			_, records, err := net.DefaultResolver.LookupSRV(ctx, "", "", query)
+			if err != nil {
+				return status.Errorf(codes.Internal, "error resolving peers: %s", err)
+			}
+			for _, srv := range records {
+				p = fmt.Sprintf("%s:%d", srv.Target, srv.Port)
+			}
+		}
+		peers = append(peers, p)
+	}
+
+	drainHeapSize := 10 * len(peers)
+	flushInterval := time.Duration(2*len(peers)) * time.Second
 
 	// Use a buffered channel so that we can continue to receive packets from peers while merging
-	peerPackets := make(chan gopacket.Packet, len(s.peers))
+	peerPackets := make(chan gopacket.Packet, len(peers))
 
 	// start a consumer goroutine that buffers and merges the packets from each
 	// peer before sending them to the client
@@ -154,7 +172,7 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 	})
 
 	var peerWg sync.WaitGroup
-	for _, peer := range s.peers {
+	for _, peer := range peers {
 		// start a producer goroutine for each peer
 		peerWg.Add(1)
 		eg.Go(func() error {
@@ -186,7 +204,6 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 		close(peerPackets)
 	}()
 
-	fmt.Println("waiting for go routines to stop")
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("error occurred while querying peers: %w", err)
 	}
