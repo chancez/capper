@@ -39,10 +39,6 @@ func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pc
 		return nil, fmt.Errorf("error activating handle: %w", err)
 	}
 
-	if err := handle.SetLinkType(layers.LinkTypeEthernet); err != nil {
-		return nil, fmt.Errorf("error setting link type on handle: %w", err)
-	}
-
 	if filter != "" {
 		if err := handle.SetBPFFilter(filter); err != nil {
 			return nil, fmt.Errorf("error setting filter on handle: %w", err)
