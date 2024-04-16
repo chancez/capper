@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: capper-server
+  labels:
+    app: capper
+    component: server
+spec:
+  selector:
+    matchLabels:
+      app: capper
+      component: server
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container:  capper
+      labels:
+        app: capper
+        component: server
+    spec:
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      hostNetwork: true
+      containers:
+      - name: capper
+        image: ghcr.io/chancez/capper:latest
+        imagePullPolicy: IfNotPresent
+        args:
+          - server
+          - --listen-address
+          - 0.0.0.0:48999
+        ports:
+          - name: grpc
+            containerPort: 48999
+            protocol: TCP
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        readinessProbe:
+          grpc:
+            port: 48999
+      terminationGracePeriodSeconds: 30
+

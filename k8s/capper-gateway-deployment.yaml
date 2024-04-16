@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: capper-gateway
+  labels:
+    app: capper
+    component: gateway
+spec:
+  selector:
+    matchLabels:
+      app: capper
+      component: gateway
+  replicas: 1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container:  capper
+      labels:
+        app: capper
+        component: gateway
+    spec:
+      containers:
+      - name: capper
+        image: ghcr.io/chancez/capper:latest
+        imagePullPolicy: IfNotPresent
+        args:
+          - gateway
+          - --listen-address
+          - 0.0.0.0:48999
+          - --peers
+          - dnssrv+_grpc._tcp.capper-server.default.svc.cluster.local
+        ports:
+          - name: grpc
+            containerPort: 48999
+            protocol: TCP
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        readinessProbe:
+          grpc:
+            port: 48999
+      terminationGracePeriodSeconds: 30
+      restartPolicy: Always
