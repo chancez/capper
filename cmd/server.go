@@ -14,6 +14,7 @@ import (
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -45,18 +46,16 @@ func runServer(listen string) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	s := grpc.NewServer()
 
 	logger := slog.Default()
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	srv := &server{
+	s := newGRPCServer(logger, &server{
 		clock:   clockwork.NewRealClock(),
 		log:     logger,
 		promisc: true,
-	}
-	capperpb.RegisterCapperServer(s, srv)
-	reflection.Register(s)
+	})
+
 	slog.Info("starting server", "listen-address", listen)
 	if err := s.Serve(lis); err != nil {
 		return fmt.Errorf("failed to serve: %w", err)
@@ -72,8 +71,6 @@ type server struct {
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
-	s.log.Debug("Capture Started")
-	defer s.log.Debug("Capture finished")
 	iface := req.GetInterface()
 	if iface == "" {
 		iface = "any"
@@ -87,10 +84,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	}
 	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, nil
 }
-
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
-	s.log.Debug("StreamCapture Started")
-	defer s.log.Debug("StreamCapture finished")
 	iface := req.GetInterface()
 	if iface == "" {
 		iface = "any"
@@ -121,4 +115,32 @@ func newStreamPacketHandler(snaplen uint32, linkType layers.LinkType, stream cap
 		return nil
 	})
 	return capture.ChainPacketHandlers(writeHandler, streamHandler)
+}
+
+func InterceptorLogger(l *slog.Logger) logging.Logger {
+	return logging.LoggerFunc(func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
+		l.Log(ctx, slog.Level(lvl), msg, fields...)
+	})
+}
+
+func newGRPCServer(logger *slog.Logger, capperSrv capperpb.CapperServer) *grpc.Server {
+	opts := []logging.Option{
+		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
+		logging.WithCodes(logging.DefaultErrorToCode),
+		logging.WithLevels(logging.DefaultClientCodeToLevel),
+		logging.WithDurationField(logging.DefaultDurationToFields),
+	}
+
+	s := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			logging.UnaryServerInterceptor(InterceptorLogger(logger), opts...),
+		),
+		grpc.ChainStreamInterceptor(
+			logging.StreamServerInterceptor(InterceptorLogger(logger), opts...),
+		),
+	)
+
+	capperpb.RegisterCapperServer(s, capperSrv)
+	reflection.Register(s)
+	return s
 }

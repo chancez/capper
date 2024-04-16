@@ -19,7 +19,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/reflection"
 )
 
 // gatewayCmd represents the gateway command
@@ -50,18 +49,16 @@ func runGateway(listen string, peers []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	s := grpc.NewServer()
 
 	logger := slog.Default()
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	srv := &gateway{
+	s := newGRPCServer(logger, &gateway{
 		clock: clockwork.NewRealClock(),
 		log:   logger,
 		peers: peers,
-	}
-	capperpb.RegisterCapperServer(s, srv)
-	reflection.Register(s)
+	})
+
 	slog.Info("starting gateway", "listen-address", listen, "peers", peers)
 	if err := s.Serve(lis); err != nil {
 		return fmt.Errorf("failed to serve: %w", err)
@@ -78,8 +75,6 @@ type gateway struct {
 }
 
 func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
-	s.log.Debug("StreamCapture Started")
-	defer s.log.Debug("StreamCapture finished")
 	streamCtx := stream.Context()
 	eg, ctx := errgroup.WithContext(streamCtx)
 

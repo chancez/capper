@@ -4,6 +4,7 @@ go 1.22.2
 
 require (
 	github.com/gopacket/gopacket v1.2.0
+	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0
 	github.com/jonboulle/clockwork v0.4.0
 	github.com/spf13/cobra v1.8.0
 	golang.org/x/sync v0.7.0
