@@ -107,8 +107,12 @@ func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (st
 		if err != nil {
 			return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
 		}
-		netns = podNetns
-		s.log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+		if netns == "" {
+			s.log.Debug("could not find netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+		} else {
+			netns = podNetns
+			s.log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+		}
 	}
 	return netns, nil
 }

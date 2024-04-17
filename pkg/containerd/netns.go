@@ -25,7 +25,8 @@ func GetPodNetns(ctx context.Context, client *containerd.Client, pod, namespace 
 		return "", err
 	}
 	if len(cs) == 0 {
-		return "", fmt.Errorf("could not find pod '%s/%s", namespace, pod)
+		// no containers matching
+		return "", nil
 	}
 	// All containers in the pod share a network namespace.
 	ctr := cs[0]

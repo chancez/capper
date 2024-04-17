@@ -96,6 +96,9 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
+		if netns == "" {
+			return fmt.Errorf("could not find netns for pod '%s/%s'", k8sNs, k8sPod)
+		}
 		log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", netns)
 	}
 
