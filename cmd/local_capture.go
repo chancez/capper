@@ -27,6 +27,7 @@ func init() {
 	localCaptureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	localCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
 	localCaptureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
+	localCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
 }
 
 func runLocalCapture(cmd *cobra.Command, args []string) error {
@@ -62,6 +63,11 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	netns, err := cmd.Flags().GetString("netns")
+	if err != nil {
+		return err
+	}
+
 	conf := capture.Config{
 		Interface:       device,
 		Filter:          filter,
@@ -69,6 +75,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		Promisc:         !noPromisc,
 		NumPackets:      numPackets,
 		CaptureDuration: dur,
+		Netns:           netns,
 	}
 	log := slog.Default()
 	return localCapture(cmd.Context(), log, conf, outputFile, alwaysPrint)
@@ -93,6 +100,7 @@ func localCapture(ctx context.Context, log *slog.Logger, conf capture.Config, ou
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
+
 	err := capture.Run(ctx, log, conf, handler)
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
