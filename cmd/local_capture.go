@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/chancez/capper/pkg/capture"
+	"github.com/chancez/capper/pkg/containerd"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/spf13/cobra"
 )
@@ -28,6 +29,8 @@ func init() {
 	localCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
 	localCaptureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
 	localCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
+	localCaptureCmd.Flags().String("k8s-pod", "", "")
+	localCaptureCmd.Flags().String("k8s-namespace", "", "")
 }
 
 func runLocalCapture(cmd *cobra.Command, args []string) error {
@@ -68,6 +71,33 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	k8sPod, err := cmd.Flags().GetString("k8s-pod")
+	if err != nil {
+		return err
+	}
+	k8sNs, err := cmd.Flags().GetString("k8s-namespace")
+	if err != nil {
+		return err
+	}
+
+	log := slog.Default()
+	if k8sNs != "" && k8sPod != "" {
+		containerdSock := "/run/containerd/containerd.sock"
+		log.Debug("connecting to containerd", "addr", containerdSock)
+		client, err := containerd.New(containerdSock)
+		if err != nil {
+			return fmt.Errorf("error connecting to containerd: %w", err)
+		}
+		defer client.Close()
+
+		log.Debug("looking up k8s pod in containerd", "pod", k8sPod, "namespace", k8sNs)
+		netns, err = containerd.GetPodNetns(client, k8sPod, k8sNs)
+		if err != nil {
+			return fmt.Errorf("error getting pod namespace: %w", err)
+		}
+		log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", netns)
+	}
+
 	conf := capture.Config{
 		Interface:       device,
 		Filter:          filter,
@@ -77,7 +107,6 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		CaptureDuration: dur,
 		Netns:           netns,
 	}
-	log := slog.Default()
 	return localCapture(cmd.Context(), log, conf, outputFile, alwaysPrint)
 }
 

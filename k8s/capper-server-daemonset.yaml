@@ -21,7 +21,10 @@ spec:
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
+      # Needed to capture packets of other pods, the host, etc.
       hostNetwork: true
+      # Needed so we can access /proc/$PID/ns/net
+      hostPID: true
       containers:
       - name: capper
         image: ghcr.io/chancez/capper:latest
@@ -30,10 +33,17 @@ spec:
           - server
           - --listen-address
           - 0.0.0.0:48999
+        securityContext:
+          privileged: true
         ports:
           - name: grpc
             containerPort: 48999
             protocol: TCP
+        volumeMounts:
+          - name: containerd
+            mountPath: /run/containerd
+          - name: var-run
+            mountPath: /var/run
         resources:
           limits:
             memory: 200Mi
@@ -44,4 +54,11 @@ spec:
           grpc:
             port: 48999
       terminationGracePeriodSeconds: 30
-
+      volumes:
+        - name: containerd
+          hostPath:
+            path: /run/containerd/
+        # /var/run/netns/...
+        - name: var-run
+          hostPath:
+            path: /var/run
