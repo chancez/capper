@@ -109,12 +109,14 @@ func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandl
 		return nil
 	}
 
-	var err error
-	if conf.Netns != "" && runtime.GOOS == "linux" {
-		err = namespaces.RunInNetns(runCapture, conf.Netns)
-	} else {
-		err = runCapture()
+	if runtime.GOOS == "linux" && conf.Netns != "" {
+		runCaptureOld := runCapture
+		runCapture = func() error {
+			return namespaces.RunInNetns(runCaptureOld, conf.Netns)
+		}
 	}
+
+	err := runCapture()
 	if err != nil {
 		return err
 	}
