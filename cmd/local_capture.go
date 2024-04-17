@@ -29,8 +29,8 @@ func init() {
 	localCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
 	localCaptureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
 	localCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
-	localCaptureCmd.Flags().String("k8s-pod", "", "")
-	localCaptureCmd.Flags().String("k8s-namespace", "", "")
+	localCaptureCmd.Flags().String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
+	localCaptureCmd.Flags().String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
 }
 
 func runLocalCapture(cmd *cobra.Command, args []string) error {

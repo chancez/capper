@@ -42,6 +42,8 @@ func init() {
 	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
 	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
 	remoteCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
+	remoteCaptureCmd.Flags().String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
+	remoteCaptureCmd.Flags().String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
 }
 
 func runRemoteCapture(cmd *cobra.Command, args []string) error {
@@ -89,19 +91,32 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	conf := capture.Config{
-		Interface:       device,
-		Filter:          filter,
-		Snaplen:         snaplen,
-		NumPackets:      numPackets,
-		CaptureDuration: captureDuration,
-		Netns:           netns,
+	k8sPod, err := cmd.Flags().GetString("k8s-pod")
+	if err != nil {
+		return err
+	}
+	k8sNs, err := cmd.Flags().GetString("k8s-namespace")
+	if err != nil {
+		return err
+	}
+
+	req := &capperpb.CaptureRequest{
+		Interface:  device,
+		Filter:     filter,
+		Snaplen:    int64(snaplen),
+		NumPackets: numPackets,
+		Duration:   durationpb.New(captureDuration),
+		Netns:      netns,
+		K8SPodFilter: &capperpb.K8SPodFilter{
+			Namespace: k8sNs,
+			Pod:       k8sPod,
+		},
 	}
 	log := slog.Default()
-	return remoteCapture(cmd.Context(), log, addr, connTimeout, reqTimeout, conf, outputFile, alwaysPrint)
+	return remoteCapture(cmd.Context(), log, addr, connTimeout, reqTimeout, req, outputFile, alwaysPrint)
 }
 
-func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, conf capture.Config, outputFile string, alwaysPrint bool) error {
+func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
@@ -127,14 +142,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	}
 
 	log.Debug("creating capture stream")
-	stream, err := c.StreamCapture(reqCtx, &capperpb.CaptureRequest{
-		Interface:  conf.Interface,
-		Filter:     conf.Filter,
-		Snaplen:    int64(conf.Snaplen),
-		NumPackets: conf.NumPackets,
-		Duration:   durationpb.New(conf.CaptureDuration),
-		Netns:      conf.Netns,
-	})
+	stream, err := c.StreamCapture(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
@@ -149,7 +157,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f, uint32(conf.Snaplen), layers.LinkTypeEthernet)
+		writeHandler := capture.NewPacketWriterHandler(f, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
