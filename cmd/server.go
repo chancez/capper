@@ -82,6 +82,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		Promisc:         s.promisc,
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
+		Netns:           req.GetNetns(),
 	}
 	err := capture.Run(ctx, s.log, conf, writeHandler)
 	if err != nil {
@@ -98,6 +99,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		Promisc:         s.promisc,
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
+		Netns:           req.GetNetns(),
 	}
 	err := capture.Run(stream.Context(), s.log, conf, streamHandler)
 	if err != nil {

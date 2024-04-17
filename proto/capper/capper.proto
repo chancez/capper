@@ -18,6 +18,7 @@ message CaptureRequest {
   google.protobuf.Duration duration = 3;
   string interface = 4;
   int64 snaplen = 5;
+  string netns = 6;
 }
 
 message CaptureResponse {

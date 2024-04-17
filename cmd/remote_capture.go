@@ -40,6 +40,7 @@ func init() {
 	remoteCaptureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
 	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
 	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
+	remoteCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
 }
 
 func runRemoteCapture(cmd *cobra.Command, args []string) error {
@@ -75,6 +76,10 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	netns, err := cmd.Flags().GetString("netns")
+	if err != nil {
+		return err
+	}
 	reqTimeout, err := cmd.Flags().GetDuration("request-timeout")
 	if err != nil {
 		return err
@@ -83,10 +88,10 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return remoteCapture(cmd.Context(), addr, connTimeout, reqTimeout, device, filter, snaplen, outputFile, alwaysPrint, numPackets, captureDuration)
+	return remoteCapture(cmd.Context(), addr, connTimeout, reqTimeout, device, filter, snaplen, outputFile, alwaysPrint, numPackets, captureDuration, netns)
 }
 
-func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout time.Duration, device string, filter string, snaplen int, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration) error {
+func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout time.Duration, device string, filter string, snaplen int, outputFile string, alwaysPrint bool, numPackets uint64, captureDuration time.Duration, netns string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
@@ -115,6 +120,7 @@ func remoteCapture(ctx context.Context, addr string, connTimeout, reqTimeout tim
 		Snaplen:    int64(snaplen),
 		NumPackets: numPackets,
 		Duration:   durationpb.New(captureDuration),
+		Netns:      netns,
 	})
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
