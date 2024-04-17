@@ -11,7 +11,9 @@ import (
 	"net"
 
 	"github.com/chancez/capper/pkg/capture"
+	containerdutil "github.com/chancez/capper/pkg/containerd"
 	capperpb "github.com/chancez/capper/proto/capper"
+	"github.com/containerd/containerd"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
@@ -34,16 +36,22 @@ var serverCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runServer(listen)
+		enableContainerd, err := cmd.Flags().GetBool("enable-containerd")
+		if err != nil {
+			return err
+		}
+
+		return runServer(listen, enableContainerd)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().String("listen-address", "127.0.0.1:48999", "Server listen address")
+	serverCmd.Flags().Bool("enable-containerd", false, "Enable containerd/Kubernetes integration")
 }
 
-func runServer(listen string) error {
+func runServer(listen string, enableContainerd bool) error {
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
@@ -52,10 +60,23 @@ func runServer(listen string) error {
 	logger := slog.Default()
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
+	var containerdClient *containerd.Client
+	if enableContainerd {
+		containerdSock := "/run/containerd/containerd.sock"
+		logger.Debug("connecting to containerd", "addr", containerdSock)
+		var err error
+		containerdClient, err = containerdutil.New(containerdSock)
+		if err != nil {
+			return fmt.Errorf("error connecting to containerd: %w", err)
+		}
+		defer containerdClient.Close()
+	}
+
 	s := newGRPCServer(logger, &server{
-		clock:   clockwork.NewRealClock(),
-		log:     logger,
-		promisc: true,
+		clock:            clockwork.NewRealClock(),
+		log:              logger,
+		promisc:          true,
+		containerdClient: containerdClient,
 	})
 
 	slog.Info("starting server", "listen-address", listen)
@@ -67,14 +88,40 @@ func runServer(listen string) error {
 
 type server struct {
 	capperpb.UnimplementedCapperServer
-	clock   clockwork.Clock
-	log     *slog.Logger
-	promisc bool
+	clock            clockwork.Clock
+	log              *slog.Logger
+	containerdClient *containerd.Client
+	promisc          bool
+}
+
+func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (string, error) {
+	netns := req.GetNetns()
+	k8sNs := req.GetK8SPodFilter().GetNamespace()
+	k8sPod := req.GetK8SPodFilter().GetPod()
+	if k8sNs != "" && k8sPod != "" {
+		if s.containerdClient == nil {
+			return "", status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
+		}
+		s.log.Debug("looking up k8s pod in containerd", "pod", k8sPod, "namespace", k8sNs)
+		podNetns, err := containerdutil.GetPodNetns(ctx, s.containerdClient, k8sPod, k8sNs)
+		if err != nil {
+			return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
+		}
+		netns = podNetns
+		s.log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+	}
+	return netns, nil
 }
 
 func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
+	netns, err := s.getNetns(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("error getting netns: %w", err)
+	}
+
 	var buf bytes.Buffer
 	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
+
 	conf := capture.Config{
 		Interface:       req.GetInterface(),
 		Filter:          req.GetFilter(),
@@ -82,15 +129,21 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		Promisc:         s.promisc,
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
-		Netns:           req.GetNetns(),
+		Netns:           netns,
 	}
-	err := capture.Run(ctx, s.log, conf, writeHandler)
+	err = capture.Run(ctx, s.log, conf, writeHandler)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
 	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, nil
 }
 func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
+	ctx := stream.Context()
+	netns, err := s.getNetns(ctx, req)
+	if err != nil {
+		return err
+	}
+
 	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
 	conf := capture.Config{
 		Interface:       req.GetInterface(),
@@ -99,9 +152,9 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		Promisc:         s.promisc,
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
-		Netns:           req.GetNetns(),
+		Netns:           netns,
 	}
-	err := capture.Run(stream.Context(), s.log, conf, streamHandler)
+	err = capture.Run(ctx, s.log, conf, streamHandler)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}

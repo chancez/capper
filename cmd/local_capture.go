@@ -81,6 +81,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	log := slog.Default()
+	ctx := cmd.Context()
 	if k8sNs != "" && k8sPod != "" {
 		containerdSock := "/run/containerd/containerd.sock"
 		log.Debug("connecting to containerd", "addr", containerdSock)
@@ -91,7 +92,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		defer client.Close()
 
 		log.Debug("looking up k8s pod in containerd", "pod", k8sPod, "namespace", k8sNs)
-		netns, err = containerd.GetPodNetns(client, k8sPod, k8sNs)
+		netns, err = containerd.GetPodNetns(ctx, client, k8sPod, k8sNs)
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
@@ -107,7 +108,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		CaptureDuration: dur,
 		Netns:           netns,
 	}
-	return localCapture(cmd.Context(), log, conf, outputFile, alwaysPrint)
+	return localCapture(ctx, log, conf, outputFile, alwaysPrint)
 }
 
 // localCapture runs a packet capture and stores the output to the specified file or

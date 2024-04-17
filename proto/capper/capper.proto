@@ -19,6 +19,12 @@ message CaptureRequest {
   string interface = 4;
   int64 snaplen = 5;
   string netns = 6;
+  K8sPodFilter k8s_pod_filter = 7;
+}
+
+message K8sPodFilter {
+  string namespace = 1;
+  string pod = 2;
 }
 
 message CaptureResponse {

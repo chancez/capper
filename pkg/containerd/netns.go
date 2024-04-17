@@ -13,12 +13,12 @@ func New(addr string) (*containerd.Client, error) {
 	return containerd.New(addr, containerd.WithDefaultNamespace("k8s.io"))
 }
 
-func GetPodNetns(client *containerd.Client, pod, namespace string) (string, error) {
+func GetPodNetns(ctx context.Context, client *containerd.Client, pod, namespace string) (string, error) {
 	if pod == "" || namespace == "" {
 		return "", errors.New("invalid arguments, pod and namespace must be non-empty")
 	}
 
-	ctrCtx := namespaces.WithNamespace(context.Background(), "k8s.io")
+	ctrCtx := namespaces.WithNamespace(ctx, "k8s.io")
 	filter := fmt.Sprintf("labels.io.kubernetes.pod.name==%s,labels.io.kubernetes.pod.namespace==%s", pod, namespace)
 	cs, err := client.Containers(ctrCtx, filter)
 	if err != nil {
