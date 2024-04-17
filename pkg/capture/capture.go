@@ -7,8 +7,10 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"runtime"
 	"time"
 
+	"github.com/chancez/capper/pkg/namespaces"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
@@ -55,6 +57,7 @@ type Config struct {
 	Promisc         bool
 	NumPackets      uint64
 	CaptureDuration time.Duration
+	Netns           string
 }
 
 type PacketHandler interface {
@@ -67,31 +70,55 @@ func (f PacketHandlerFunc) HandlePacket(p gopacket.Packet) error {
 	return f(p)
 }
 
-func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandler) error {
-	clock := clockwork.NewRealClock()
-
+func getInterface(log *slog.Logger, conf Config) (string, error) {
 	device := conf.Interface
 	if device == "" {
 		log.Debug("interface not specified, using first interface")
 		ifaces, err := net.Interfaces()
 		if err != nil {
-			return fmt.Errorf("error listing network interfaces: %w", err)
+			return "", fmt.Errorf("error listing network interfaces: %w", err)
 		}
 		if len(ifaces) == 0 {
-			return errors.New("host has no interfaces")
+			return "", errors.New("host has no interfaces")
 
 		}
 		device = ifaces[0].Name
 	}
+	return device, nil
+}
 
+func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandler) error {
+	clock := clockwork.NewRealClock()
 	start := clock.Now()
 	count := uint64(0)
-	log.Debug("starting capture", "interface", device, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 
-	handle, err := NewLiveHandle(device, conf.Filter, conf.Snaplen, conf.Promisc)
-	if err != nil {
-		return fmt.Errorf("error creating handle: %w", err)
+	var handle *pcap.Handle
+	var device string
+	runCapture := func() error {
+		var err error
+		device, err = getInterface(log, conf)
+		if err != nil {
+			return fmt.Errorf("error getting interface: %w", err)
+		}
+
+		log.Debug("starting capture", "interface", device, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
+		handle, err = NewLiveHandle(device, conf.Filter, conf.Snaplen, conf.Promisc)
+		if err != nil {
+			return fmt.Errorf("error creating handle: %w", err)
+		}
+		return nil
 	}
+
+	var err error
+	if conf.Netns != "" && runtime.GOOS == "linux" {
+		err = namespaces.RunInNetns(runCapture, conf.Netns)
+	} else {
+		err = runCapture()
+	}
+	if err != nil {
+		return err
+	}
+
 	defer func() {
 		log.Debug("capture finished", "interface", device, "packets", count, "capture_duration", clock.Since(start))
 		handle.Close()
