@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"runtime"
 	"time"
 
@@ -74,7 +73,7 @@ func getInterface(log *slog.Logger, conf Config) (string, error) {
 	device := conf.Interface
 	if device == "" {
 		log.Debug("interface not specified, using first interface")
-		ifaces, err := net.Interfaces()
+		ifaces, err := pcap.FindAllDevs()
 		if err != nil {
 			return "", fmt.Errorf("error listing network interfaces: %w", err)
 		}

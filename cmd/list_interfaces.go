@@ -3,10 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"runtime"
 
 	"github.com/chancez/capper/pkg/namespaces"
+	"github.com/gopacket/gopacket/pcap"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +28,7 @@ func runListInterfaces(cmd *cobra.Command, args []string) error {
 	}
 
 	listIfaces := func() error {
-		ifaces, err := net.Interfaces()
+		ifaces, err := pcap.FindAllDevs()
 		if err != nil {
 			return fmt.Errorf("error listing network interfaces: %w", err)
 		}
