@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -162,7 +163,11 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	return handleClientStream(ctx, handler, stream)
+	err = handleClientStream(ctx, handler, stream)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }
 
 func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_StreamCaptureClient) error {
