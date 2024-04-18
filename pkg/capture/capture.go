@@ -14,8 +14,8 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
-	inactive, err := pcap.NewInactiveHandle(device)
+func NewLiveHandle(iface string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
+	inactive, err := pcap.NewInactiveHandle(iface)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,6 @@ func NewLiveHandle(device string, filter string, snaplen int, promisc bool) (*pc
 }
 
 type Config struct {
-	Interface       string
 	Filter          string
 	Snaplen         int
 	Promisc         bool
@@ -56,39 +55,37 @@ type Config struct {
 	Netns           string
 }
 
-func getInterface(log *slog.Logger, conf Config) (string, error) {
-	device := conf.Interface
-	if device == "" {
-		log.Debug("interface not specified, using first interface")
-		ifaces, err := pcap.FindAllDevs()
-		if err != nil {
-			return "", fmt.Errorf("error listing network interfaces: %w", err)
-		}
-		if len(ifaces) == 0 {
-			return "", errors.New("host has no interfaces")
-
-		}
-		device = ifaces[0].Name
+func getInterface() (string, error) {
+	ifaces, err := pcap.FindAllDevs()
+	if err != nil {
+		return "", fmt.Errorf("error listing network interfaces: %w", err)
 	}
-	return device, nil
+	if len(ifaces) == 0 {
+		return "", errors.New("host has no interfaces")
+
+	}
+	return ifaces[0].Name, nil
 }
 
-func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandler) error {
+// Run a packet capture on the specified interface, calling handler on each packet captured.
+func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handler PacketHandler) error {
 	clock := clockwork.NewRealClock()
 	start := clock.Now()
 	count := uint64(0)
 
 	var handle *pcap.Handle
-	var device string
 	runCapture := func() error {
 		var err error
-		device, err = getInterface(log, conf)
-		if err != nil {
-			return fmt.Errorf("error getting interface: %w", err)
+		if iface == "" {
+			log.Debug("interface not specified, using first interface")
+			iface, err = getInterface()
+			if err != nil {
+				return fmt.Errorf("error getting interface: %w", err)
+			}
 		}
 
-		log.Debug("starting capture", "interface", device, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
-		handle, err = NewLiveHandle(device, conf.Filter, conf.Snaplen, conf.Promisc)
+		log.Debug("starting capture", "interface", iface, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
+		handle, err = NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc)
 		if err != nil {
 			return fmt.Errorf("error creating handle: %w", err)
 		}
@@ -108,7 +105,7 @@ func Run(ctx context.Context, log *slog.Logger, conf Config, handler PacketHandl
 	}
 
 	defer func() {
-		log.Debug("capture finished", "interface", device, "packets", count, "capture_duration", clock.Since(start))
+		log.Debug("capture finished", "interface", iface, "packets", count, "capture_duration", clock.Since(start))
 		handle.Close()
 	}()
 

@@ -125,7 +125,6 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
 
 	conf := capture.Config{
-		Interface:       req.GetInterface(),
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
 		Promisc:         req.GetNoPromiscuousMode(),
@@ -133,7 +132,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
 	}
-	err = capture.Run(ctx, s.log, conf, writeHandler)
+	err = capture.Run(ctx, s.log, req.GetInterface(), conf, writeHandler)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -148,7 +147,6 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 
 	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
 	conf := capture.Config{
-		Interface:       req.GetInterface(),
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
 		Promisc:         req.GetNoPromiscuousMode(),
@@ -156,7 +154,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
 	}
-	err = capture.Run(ctx, s.log, conf, streamHandler)
+	err = capture.Run(ctx, s.log, req.GetInterface(), conf, streamHandler)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
