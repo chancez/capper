@@ -57,9 +57,10 @@ func runGateway(listen string, peers []string) error {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	s := newGRPCServer(logger, &gateway{
-		clock: clockwork.NewRealClock(),
-		log:   logger,
-		peers: peers,
+		clock:       clockwork.NewRealClock(),
+		log:         logger,
+		peers:       peers,
+		connTimeout: 5 * time.Second,
 	})
 
 	slog.Info("starting gateway", "listen-address", listen, "peers", peers)
@@ -178,9 +179,13 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 		eg.Go(func() error {
 			defer peerWg.Done()
 			s.log.Debug("connecting to peer", "peer", peer)
-			connCtx, connCancel := context.WithTimeout(ctx, s.connTimeout)
+			connCtx := ctx
+			if s.connTimeout != 0 {
+				var connCancel context.CancelFunc
+				connCtx, connCancel = context.WithTimeout(ctx, s.connTimeout)
+				defer connCancel()
+			}
 			conn, err := grpc.DialContext(connCtx, peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-			connCancel()
 			if err != nil {
 				return fmt.Errorf("error connecting to peer: %w", err)
 			}
