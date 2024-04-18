@@ -173,7 +173,10 @@ func newStreamPacketHandler(snaplen uint32, linkType layers.LinkType, stream cap
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
 		}); err != nil {
-			return status.Errorf(codes.Internal, "error sending packet: %s", err)
+			if status.Code(err) == codes.Canceled {
+				return nil
+			}
+			return fmt.Errorf("error sending packet: %w", err)
 		}
 		// Reset the buffer after sending the contents
 		buf.Reset()

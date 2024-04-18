@@ -16,7 +16,6 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -167,7 +166,13 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		writeHandler := capture.NewPacketWriterHandler(f, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
 		handlers = append(handlers, writeHandler)
 	}
+	packetsTotal := 0
+	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error { packetsTotal++; return nil })
+	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
+	defer func() {
+		fmt.Printf("%d packets received\n", packetsTotal)
+	}()
 
 	err = handleClientStream(ctx, handler, stream)
 	if errors.Is(err, io.EOF) {
@@ -177,54 +182,102 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 }
 
 func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_StreamCaptureClient) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	reader, err := newClientStreamReader(stream)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	// before calling link type, need to start reader.
+	packetSource := gopacket.NewPacketSource(reader, reader.LinkType())
+	packetsCh := packetSource.PacketsCtx(ctx)
+
+	for packet := range packetsCh {
+		if err := handler.HandlePacket(packet); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type clientStreamReader struct {
+	pipeReader *io.PipeReader
+	pipeWriter *io.PipeWriter
+	stream     capperpb.Capper_StreamCaptureClient
+
+	pcapReader *pcapgo.Reader
+	errCh      chan error
+}
+
+func newClientStreamReader(stream capperpb.Capper_StreamCaptureClient) (*clientStreamReader, error) {
 	r, w := io.Pipe()
-	var eg errgroup.Group
+	rw := &clientStreamReader{
+		pipeReader: r,
+		pipeWriter: w,
+		stream:     stream,
+	}
+	// begin reading from the stream and create the pcapReader
+	if err := rw.start(); err != nil {
+		return nil, err
+	}
+	return rw, nil
+}
 
-	// Takes the incoming packet data and parses it back into a gopacket.Packet
-	// which the PacketHandler can process.
-	eg.Go(func() error {
-		// We have to initialize this in the go routine since initializing the
-		// reader causes it to start reading from the io.Reader, trying to parse
-		// the pcap header.
-		pcapReader, err := pcapgo.NewReader(r)
-		if err != nil {
-			return fmt.Errorf("error creating pcap reader: %w", err)
+func (rw *clientStreamReader) ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error) {
+	select {
+	case err, ok := <-rw.errCh:
+		if !ok {
+			err = io.EOF
 		}
-		packetSource := gopacket.NewPacketSource(pcapReader, pcapReader.LinkType())
-		for packet := range packetSource.PacketsCtx(ctx) {
-			if err := handler.HandlePacket(packet); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+		return nil, gopacket.CaptureInfo{}, err
+	default:
+		return rw.pcapReader.ReadPacketData()
+	}
+}
 
-	// Read packets from the gRPC stream and send them to the reader go routine started above.
-	eg.Go(func() error {
-		defer w.Close()
+func (rw *clientStreamReader) LinkType() layers.LinkType {
+	return rw.pcapReader.LinkType()
+}
+
+func (rw *clientStreamReader) Close() error {
+	return rw.pipeReader.Close()
+}
+
+func (rw *clientStreamReader) start() error {
+	rw.errCh = make(chan error, 1)
+	go func() {
+		defer close(rw.errCh)
+		defer rw.pipeWriter.Close()
 		for {
-			resp, err := stream.Recv()
-			if err == io.EOF {
-				break
-			}
+			// Read packets from the gRPC stream and send them to the reader via the pipeWriter
+			resp, err := rw.stream.Recv()
 			if status.Code(err) == codes.Canceled {
 				break
 			}
 			if err != nil {
-				return fmt.Errorf("error reading from stream: %w", err)
+				rw.errCh <- fmt.Errorf("error reading from stream: %w", err)
+				return
 			}
-			_, err = w.Write(resp.GetData())
+			_, err = rw.pipeWriter.Write(resp.GetData())
+			// User closed the reader, return
+			if err == io.ErrClosedPipe {
+				break
+			}
 			if err != nil {
-				return fmt.Errorf("error writing data to buffer: %w", err)
+				rw.errCh <- fmt.Errorf("error writing data to pipe: %w", err)
+				return
 			}
 		}
-		return nil
-	})
+		rw.errCh <- nil
+	}()
 
-	err := eg.Wait()
+	pcapReader, err := pcapgo.NewReader(rw.pipeReader)
 	if err != nil {
 		return err
 	}
-
+	rw.pcapReader = pcapReader
 	return nil
 }
