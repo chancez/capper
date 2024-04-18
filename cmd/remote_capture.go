@@ -36,6 +36,7 @@ func init() {
 	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
 	remoteCaptureCmd.Flags().StringP("interface", "i", "", "Interface to capture packets on.")
 	remoteCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
+	remoteCaptureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	remoteCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
 	remoteCaptureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	remoteCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
@@ -61,6 +62,10 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	snaplen, err := cmd.Flags().GetInt("snaplen")
+	if err != nil {
+		return err
+	}
+	noPromisc, err := cmd.Flags().GetBool("no-promiscuous-mode")
 	if err != nil {
 		return err
 	}
@@ -112,6 +117,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 			Namespace: k8sNs,
 			Pod:       k8sPod,
 		},
+		NoPromiscuousMode: noPromisc,
 	}
 	log := slog.Default()
 	return remoteCapture(cmd.Context(), log, addr, connTimeout, reqTimeout, req, outputFile, alwaysPrint)

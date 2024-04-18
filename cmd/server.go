@@ -75,7 +75,6 @@ func runServer(listen string, enableContainerd bool) error {
 	s := newGRPCServer(logger, &server{
 		clock:            clockwork.NewRealClock(),
 		log:              logger,
-		promisc:          true,
 		containerdClient: containerdClient,
 	})
 
@@ -91,7 +90,6 @@ type server struct {
 	clock            clockwork.Clock
 	log              *slog.Logger
 	containerdClient *containerd.Client
-	promisc          bool
 }
 
 func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (string, error) {
@@ -130,7 +128,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		Interface:       req.GetInterface(),
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
-		Promisc:         s.promisc,
+		Promisc:         req.GetNoPromiscuousMode(),
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
@@ -153,7 +151,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		Interface:       req.GetInterface(),
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
-		Promisc:         s.promisc,
+		Promisc:         req.GetNoPromiscuousMode(),
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,

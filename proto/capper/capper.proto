@@ -20,6 +20,7 @@ message CaptureRequest {
   int64 snaplen = 5;
   string netns = 6;
   K8sPodFilter k8s_pod_filter = 7;
+  bool no_promiscuous_mode = 8;
 }
 
 message K8sPodFilter {
