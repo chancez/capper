@@ -19,21 +19,20 @@ func (f PacketHandlerFunc) HandlePacket(l layers.LinkType, p gopacket.Packet) er
 	return f(l, p)
 }
 
-type PacketWriterHandler struct {
+type PcapWriterHandler struct {
 	pcapWriter    *pcapgo.Writer
 	headerWritten bool
 	snaplen       uint32
-	linkType      layers.LinkType
 }
 
-func NewPacketWriterHandler(w io.Writer, snaplen uint32) *PacketWriterHandler {
-	return &PacketWriterHandler{
+func NewPcapWriterHandler(w io.Writer, snaplen uint32) *PcapWriterHandler {
+	return &PcapWriterHandler{
 		pcapWriter: pcapgo.NewWriter(w),
 		snaplen:    snaplen,
 	}
 }
 
-func (pwh *PacketWriterHandler) HandlePacket(linkType layers.LinkType, p gopacket.Packet) error {
+func (pwh *PcapWriterHandler) HandlePacket(linkType layers.LinkType, p gopacket.Packet) error {
 	if !pwh.headerWritten {
 		if err := pwh.pcapWriter.WriteFileHeader(pwh.snaplen, linkType); err != nil {
 			return fmt.Errorf("error writing file header: %w", err)

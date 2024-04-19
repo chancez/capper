@@ -124,7 +124,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 			w = f
 			defer f.Close()
 		}
-		writeHandler := capture.NewPacketWriterHandler(w, uint32(req.GetSnaplen()))
+		writeHandler := capture.NewPcapWriterHandler(w, uint32(req.GetSnaplen()))
 		handlers = append(handlers, writeHandler)
 	}
 	packetsTotal := 0

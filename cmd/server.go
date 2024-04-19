@@ -130,7 +130,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	}
 
 	var buf bytes.Buffer
-	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()))
+	writeHandler := capture.NewPcapWriterHandler(&buf, uint32(req.GetSnaplen()))
 
 	conf := capture.Config{
 		Filter:          req.GetFilter(),
@@ -173,7 +173,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 // bytes to the given Capper_StreamCaptureServer stream.
 func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
 	var buf bytes.Buffer
-	writeHandler := capture.NewPacketWriterHandler(&buf, snaplen)
+	writeHandler := capture.NewPcapWriterHandler(&buf, snaplen)
 	streamHandler := capture.PacketHandlerFunc(func(_ layers.LinkType, p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.StreamCaptureResponse{

@@ -84,7 +84,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf c
 			w = f
 			defer f.Close()
 		}
-		writeHandler := capture.NewPacketWriterHandler(w, uint32(conf.Snaplen))
+		writeHandler := capture.NewPcapWriterHandler(w, uint32(conf.Snaplen))
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
