@@ -21,11 +21,8 @@ RUN CC=$(/tmp/target-arch-cc.sh) MAKE_INSTALL=true /tmp/compile-libpcap.sh
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
-     CC=$(/tmp/target-arch-cc.sh) GOOS=$TARGETOS GOARCH=$TARGETARCH CGO_ENABLED=1 make capper
+     CC=$(/tmp/target-arch-cc.sh) GOOS=$TARGETOS GOARCH=$TARGETARCH CGO_ENABLED=1 make capper GO_LINKER_FLAGS="-linkmode external -extldflags \"-static\""
 
-FROM debian:bookworm
-
-COPY --from=build /lib/libpcap.* /lib/
+FROM gcr.io/distroless/base-nossl
 COPY --from=build /usr/src/app/capper /usr/bin/capper
-
 ENTRYPOINT ["/usr/bin/capper"]
