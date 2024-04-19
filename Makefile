@@ -20,4 +20,4 @@ proto:
 		proto/capper/capper.proto
 
 image:
-	docker build $(DOCKER_FLAGS) -t ghcr.io/chancez/capper:$(IMAGE_TAG) .
+	docker build $(DOCKER_FLAGS) -t quay.io/capper/capper:$(IMAGE_TAG) .
