@@ -139,7 +139,8 @@ func Start(ctx context.Context, log *slog.Logger, iface string, conf Config, han
 	return nil
 }
 
-func Multi(ctx context.Context, log *slog.Logger, ifaces []string, conf Config, handler PacketHandler) error {
+// StartMulti starts a packet capture on each of the specified interfaces.
+func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Config, handler PacketHandler) error {
 	// If we don't have multiple interfaces, just delegate to Run()
 	if len(ifaces) < 2 {
 		// Run() handles empty iface by picking one automatically if it's not specified.

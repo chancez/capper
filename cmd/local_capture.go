@@ -82,7 +82,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf c
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	err := capture.Multi(ctx, log, ifaces, conf, handler)
+	err := capture.StartMulti(ctx, log, ifaces, conf, handler)
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}

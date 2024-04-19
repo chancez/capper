@@ -140,7 +140,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
 	}
-	err = capture.Multi(ctx, s.log, req.GetInterface(), conf, writeHandler)
+	err = capture.StartMulti(ctx, s.log, req.GetInterface(), conf, writeHandler)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -162,7 +162,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
 	}
-	err = capture.Multi(ctx, s.log, req.GetInterface(), conf, streamHandler)
+	err = capture.StartMulti(ctx, s.log, req.GetInterface(), conf, streamHandler)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
