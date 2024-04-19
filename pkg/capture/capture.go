@@ -15,7 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-func NewLiveHandle(iface string, filter string, snaplen int, promisc bool) (*pcap.Handle, error) {
+func NewLiveHandle(iface string, filter string, snaplen int, promisc bool, bufferSize int) (*pcap.Handle, error) {
 	inactive, err := pcap.NewInactiveHandle(iface)
 	if err != nil {
 		return nil, err
@@ -32,6 +32,12 @@ func NewLiveHandle(iface string, filter string, snaplen int, promisc bool) (*pca
 
 	if err := inactive.SetTimeout(time.Second); err != nil {
 		return nil, fmt.Errorf("error setting timeout on handle: %w", err)
+	}
+
+	if bufferSize > 0 {
+		if err := inactive.SetBufferSize(bufferSize); err != nil {
+			return nil, fmt.Errorf("error setting buffer size on handle: %w", err)
+		}
 	}
 
 	handle, err := inactive.Activate()
@@ -54,6 +60,7 @@ type Config struct {
 	NumPackets      uint64
 	CaptureDuration time.Duration
 	Netns           string
+	BufferSize      int
 }
 
 func getInterface() (string, error) {
@@ -85,7 +92,7 @@ func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handl
 			}
 		}
 
-		handle, err = NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc)
+		handle, err = NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
 			return fmt.Errorf("error creating handle: %w", err)
 		}
@@ -146,7 +153,7 @@ func Multi(ctx context.Context, log *slog.Logger, ifaces []string, conf Config, 
 
 	runCapture := func(iface string) (*pcap.Handle, error) {
 		var err error
-		handle, err := NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc)
+		handle, err := NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
 			return nil, fmt.Errorf("error creating handle: %w", err)
 		}

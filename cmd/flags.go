@@ -24,6 +24,7 @@ func newCaptureFlags() *pflag.FlagSet {
 	fs.StringSliceP("interface", "i", []string{}, "Interface(s) to capture packets on.")
 	fs.IntP("snapshot-length", "s", 262144, "Configure the snaplength.")
 	fs.BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
+	fs.IntP("buffer-size", "B", 0, "Set the operating system capture buffer size (in bytes).") // TODO: Should we match tcpdump which has this in units of KiB?
 	fs.StringP("output-file", "w", "", "Store output into the file specified.")
 	fs.BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
@@ -41,6 +42,10 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 		return nil, err
 	}
 	snaplen, err := fs.GetInt("snapshot-length")
+	if err != nil {
+		return nil, err
+	}
+	bufferSize, err := fs.GetInt("buffer-size")
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +98,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 		CaptureConfig: capture.Config{
 			Filter:          filter,
 			Snaplen:         snaplen,
+			BufferSize:      bufferSize,
 			Promisc:         !noPromisc,
 			NumPackets:      numPackets,
 			CaptureDuration: dur,

@@ -21,6 +21,7 @@ message CaptureRequest {
   string netns = 6;
   K8sPodFilter k8s_pod_filter = 7;
   bool no_promiscuous_mode = 8;
+  int64 buffer_size = 9;
 }
 
 message K8sPodFilter {
