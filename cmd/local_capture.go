@@ -20,7 +20,7 @@ var localCaptureCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(localCaptureCmd)
-	localCaptureCmd.Flags().StringP("interface", "i", "", "Interface to capture packets on.")
+	localCaptureCmd.Flags().StringSliceP("interface", "i", []string{}, "Interface(s) to capture packets on.")
 	localCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	localCaptureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	localCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
@@ -38,7 +38,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
 		filter = args[0]
 	}
-	iface, err := cmd.Flags().GetString("interface")
+	ifaces, err := cmd.Flags().GetStringSlice("interface")
 	if err != nil {
 		return err
 	}
@@ -118,14 +118,14 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		CaptureDuration: dur,
 		Netns:           netns,
 	}
-	return localCapture(ctx, log, iface, conf, outputFile, alwaysPrint)
+	return localCapture(ctx, log, ifaces, conf, outputFile, alwaysPrint)
 }
 
 // localCapture runs a packet capture and stores the output to the specified file or
 // logs the packets to stdout with the configured logger if outputFile is
 // empty.
 // If alwaysPrint is true; it prints regardless whether outputFile is empty.
-func localCapture(ctx context.Context, log *slog.Logger, iface string, conf capture.Config, outputFile string, alwaysPrint bool) error {
+func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf capture.Config, outputFile string, alwaysPrint bool) error {
 	var handlers []capture.PacketHandler
 	if alwaysPrint || outputFile == "" {
 		handlers = append(handlers, capture.PacketPrinterHandler)
@@ -141,7 +141,7 @@ func localCapture(ctx context.Context, log *slog.Logger, iface string, conf capt
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	err := capture.Run(ctx, log, iface, conf, handler)
+	err := capture.Multi(ctx, log, ifaces, conf, handler)
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}

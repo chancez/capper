@@ -131,7 +131,7 @@ func (pm *PacketMerger) run(ctx context.Context) {
 				// buffered.
 				// If there's a long delay, the ticker will flush some of the pending
 				// packets.
-				for len(pm.packetHeap) >= pm.heapDrainThreshold {
+				for len(pm.packetHeap) > 0 && len(pm.packetHeap) >= pm.heapDrainThreshold {
 					pm.sendPacket(ctx)
 					sent++
 				}
@@ -142,7 +142,7 @@ func (pm *PacketMerger) run(ctx context.Context) {
 			case <-ticker.Chan():
 				// Send 1/2 the heap if we haven't sent anything in a while
 				sent := 0
-				for ; sent < len(pm.packetHeap)/2 || len(pm.packetHeap) == 1; sent++ {
+				for ; len(pm.packetHeap) > 0 && sent < len(pm.packetHeap)/2 || len(pm.packetHeap) == 1; sent++ {
 					pm.sendPacket(ctx)
 				}
 				pm.log.Debug("reached flushInterval: flushed packets", "num_packets", sent, "flushInterval", pm.flushInterval, "heapSize", len(pm.packetHeap))

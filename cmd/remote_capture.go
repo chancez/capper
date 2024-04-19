@@ -33,7 +33,7 @@ var remoteCaptureCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(remoteCaptureCmd)
 	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
-	remoteCaptureCmd.Flags().StringP("interface", "i", "", "Interface to capture packets on.")
+	remoteCaptureCmd.Flags().StringSliceP("interface", "i", []string{}, "Interface(s) to capture packets on.")
 	remoteCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
 	remoteCaptureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	remoteCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
@@ -57,7 +57,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	device, err := cmd.Flags().GetString("interface")
+	ifaces, err := cmd.Flags().GetStringSlice("interface")
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	req := &capperpb.CaptureRequest{
-		Interface:  device,
+		Interface:  ifaces,
 		Filter:     filter,
 		Snaplen:    int64(snaplen),
 		NumPackets: numPackets,
