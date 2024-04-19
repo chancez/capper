@@ -33,59 +33,21 @@ var remoteCaptureCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(remoteCaptureCmd)
 	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
-	remoteCaptureCmd.Flags().StringSliceP("interface", "i", []string{}, "Interface(s) to capture packets on.")
-	remoteCaptureCmd.Flags().IntP("snaplen", "s", 262144, "Configure the snaplength.")
-	remoteCaptureCmd.Flags().BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
-	remoteCaptureCmd.Flags().StringP("output", "o", "", "Store output into the file specified.")
-	remoteCaptureCmd.Flags().BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
-	remoteCaptureCmd.Flags().Uint64P("num-packets", "n", 0, "Number of packets to capture.")
-	remoteCaptureCmd.Flags().DurationP("duration", "d", 0, "Duration to capture packets.")
 	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
 	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
-	remoteCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
-	remoteCaptureCmd.Flags().String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
-	remoteCaptureCmd.Flags().String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
-	remoteCaptureCmd.Flags().String("log-level", "info", "Configure the log level.")
+	captureFlags := newCaptureFlags()
+	remoteCaptureCmd.Flags().AddFlagSet(captureFlags)
 }
 
 func runRemoteCapture(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	var filter string
 	if len(args) == 1 {
 		filter = args[0]
 	}
+
 	addr, err := cmd.Flags().GetString("server")
-	if err != nil {
-		return err
-	}
-	ifaces, err := cmd.Flags().GetStringSlice("interface")
-	if err != nil {
-		return err
-	}
-	snaplen, err := cmd.Flags().GetInt("snaplen")
-	if err != nil {
-		return err
-	}
-	noPromisc, err := cmd.Flags().GetBool("no-promiscuous-mode")
-	if err != nil {
-		return err
-	}
-	outputFile, err := cmd.Flags().GetString("output")
-	if err != nil {
-		return err
-	}
-	alwaysPrint, err := cmd.Flags().GetBool("print")
-	if err != nil {
-		return err
-	}
-	numPackets, err := cmd.Flags().GetUint64("num-packets")
-	if err != nil {
-		return err
-	}
-	captureDuration, err := cmd.Flags().GetDuration("duration")
-	if err != nil {
-		return err
-	}
-	netns, err := cmd.Flags().GetString("netns")
 	if err != nil {
 		return err
 	}
@@ -97,37 +59,26 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	k8sPod, err := cmd.Flags().GetString("k8s-pod")
-	if err != nil {
-		return err
-	}
-	k8sNs, err := cmd.Flags().GetString("k8s-namespace")
-	if err != nil {
-		return err
-	}
-	logLevel, err := cmd.Flags().GetString("log-level")
-	if err != nil {
-		return err
-	}
-	log, err := newLevelLogger(logLevel)
+
+	captureOpts, err := getCaptureOpts(ctx, filter, cmd.Flags())
 	if err != nil {
 		return err
 	}
 
 	req := &capperpb.CaptureRequest{
-		Interface:  ifaces,
-		Filter:     filter,
-		Snaplen:    int64(snaplen),
-		NumPackets: numPackets,
-		Duration:   durationpb.New(captureDuration),
-		Netns:      netns,
+		Interface:  captureOpts.Interfaces,
+		Filter:     captureOpts.Filter,
+		Snaplen:    int64(captureOpts.CaptureConfig.Snaplen),
+		NumPackets: captureOpts.CaptureConfig.NumPackets,
+		Duration:   durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
+		Netns:      captureOpts.CaptureConfig.Netns,
 		K8SPodFilter: &capperpb.K8SPodFilter{
-			Namespace: k8sNs,
-			Pod:       k8sPod,
+			Namespace: captureOpts.K8sNamespace,
+			Pod:       captureOpts.K8sPod,
 		},
-		NoPromiscuousMode: noPromisc,
+		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
 	}
-	return remoteCapture(cmd.Context(), log, addr, connTimeout, reqTimeout, req, outputFile, alwaysPrint)
+	return remoteCapture(ctx, captureOpts.Logger, addr, connTimeout, reqTimeout, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
 func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
