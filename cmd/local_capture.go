@@ -8,7 +8,6 @@ import (
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/chancez/capper/pkg/containerd"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/spf13/cobra"
 )
 
@@ -137,7 +136,7 @@ func localCapture(ctx context.Context, log *slog.Logger, iface string, conf capt
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f, uint32(conf.Snaplen), layers.LinkTypeEthernet)
+		writeHandler := capture.NewPacketWriterHandler(f, uint32(conf.Snaplen))
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)

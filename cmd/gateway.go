@@ -101,6 +101,7 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 	}
 
 	var sources []capture.NamedPacketSource
+	var linkType layers.LinkType
 	for _, peer := range peers {
 		s.log.Debug("connecting to peer", "peer", peer)
 		connCtx := ctx
@@ -130,9 +131,15 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 		}
 		defer reader.Close()
 
+		fmt.Println("setting link type")
+		// Unset, use the first reader's link type
+		if linkType == layers.LinkTypeNull {
+			linkType = reader.LinkType()
+			fmt.Println("link type:", linkType)
+		}
 		sources = append(sources, capture.NamedPacketSource{
 			Name:         peer,
-			PacketSource: gopacket.NewPacketSource(reader, reader.LinkType()),
+			PacketSource: gopacket.NewPacketSource(reader, linkType),
 		})
 	}
 
@@ -142,11 +149,13 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 	mergeBufferSize := len(peers)
 	// merge the contents of the sources
 	merger := capture.NewPacketMerger(s.log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
-	handler := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
+	handler := newStreamPacketHandler(uint32(req.GetSnaplen()), stream)
 
 	s.log.Debug("receiving packets from clients")
 	for packet := range merger.PacketsCtx(ctx) {
-		if err := handler.HandlePacket(packet); err != nil {
+		// TODO: stream handler does not use link type and we have multiple link
+		// types due to multiple handles being merged
+		if err := handler.HandlePacket(linkType, packet); err != nil {
 			return err
 		}
 	}

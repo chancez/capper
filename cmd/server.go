@@ -130,7 +130,7 @@ func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*ca
 	}
 
 	var buf bytes.Buffer
-	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
+	writeHandler := capture.NewPacketWriterHandler(&buf, uint32(req.GetSnaplen()))
 
 	conf := capture.Config{
 		Filter:          req.GetFilter(),
@@ -153,7 +153,7 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 		return err
 	}
 
-	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), layers.LinkTypeEthernet, stream)
+	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), stream)
 	conf := capture.Config{
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
@@ -171,10 +171,10 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_StreamCaptureServer stream.
-func newStreamPacketHandler(snaplen uint32, linkType layers.LinkType, stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
+func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
 	var buf bytes.Buffer
-	writeHandler := capture.NewPacketWriterHandler(&buf, snaplen, linkType)
-	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
+	writeHandler := capture.NewPacketWriterHandler(&buf, snaplen)
+	streamHandler := capture.PacketHandlerFunc(func(_ layers.LinkType, p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),

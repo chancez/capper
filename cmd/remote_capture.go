@@ -171,11 +171,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 			return fmt.Errorf("error opening output: %w", err)
 		}
 		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f, uint32(req.GetSnaplen()), layers.LinkTypeEthernet)
+		writeHandler := capture.NewPacketWriterHandler(f, uint32(req.GetSnaplen()))
 		handlers = append(handlers, writeHandler)
 	}
 	packetsTotal := 0
-	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error { packetsTotal++; return nil })
+	counterHandler := capture.PacketHandlerFunc(func(layers.LinkType, gopacket.Packet) error {
+		packetsTotal++
+		return nil
+	})
 	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
 	defer func() {
@@ -204,7 +207,7 @@ func handleClientStream(ctx context.Context, handler capture.PacketHandler, stre
 	packetsCh := packetSource.PacketsCtx(ctx)
 
 	for packet := range packetsCh {
-		if err := handler.HandlePacket(packet); err != nil {
+		if err := handler.HandlePacket(reader.LinkType(), packet); err != nil {
 			return err
 		}
 	}

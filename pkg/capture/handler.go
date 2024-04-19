@@ -10,13 +10,13 @@ import (
 )
 
 type PacketHandler interface {
-	HandlePacket(gopacket.Packet) error
+	HandlePacket(layers.LinkType, gopacket.Packet) error
 }
 
-type PacketHandlerFunc func(gopacket.Packet) error
+type PacketHandlerFunc func(layers.LinkType, gopacket.Packet) error
 
-func (f PacketHandlerFunc) HandlePacket(p gopacket.Packet) error {
-	return f(p)
+func (f PacketHandlerFunc) HandlePacket(l layers.LinkType, p gopacket.Packet) error {
+	return f(l, p)
 }
 
 type PacketWriterHandler struct {
@@ -26,17 +26,16 @@ type PacketWriterHandler struct {
 	linkType      layers.LinkType
 }
 
-func NewPacketWriterHandler(w io.Writer, snaplen uint32, linkType layers.LinkType) *PacketWriterHandler {
+func NewPacketWriterHandler(w io.Writer, snaplen uint32) *PacketWriterHandler {
 	return &PacketWriterHandler{
 		pcapWriter: pcapgo.NewWriter(w),
 		snaplen:    snaplen,
-		linkType:   linkType,
 	}
 }
 
-func (pwh *PacketWriterHandler) HandlePacket(p gopacket.Packet) error {
+func (pwh *PacketWriterHandler) HandlePacket(linkType layers.LinkType, p gopacket.Packet) error {
 	if !pwh.headerWritten {
-		if err := pwh.pcapWriter.WriteFileHeader(pwh.snaplen, pwh.linkType); err != nil {
+		if err := pwh.pcapWriter.WriteFileHeader(pwh.snaplen, linkType); err != nil {
 			return fmt.Errorf("error writing file header: %w", err)
 		}
 		pwh.headerWritten = true
@@ -48,15 +47,15 @@ func (pwh *PacketWriterHandler) HandlePacket(p gopacket.Packet) error {
 	return nil
 }
 
-var PacketPrinterHandler = PacketHandlerFunc(func(p gopacket.Packet) error {
+var PacketPrinterHandler = PacketHandlerFunc(func(_ layers.LinkType, p gopacket.Packet) error {
 	fmt.Println(p)
 	return nil
 })
 
 func ChainPacketHandlers(handlers ...PacketHandler) PacketHandler {
-	return PacketHandlerFunc(func(p gopacket.Packet) error {
+	return PacketHandlerFunc(func(l layers.LinkType, p gopacket.Packet) error {
 		for _, handler := range handlers {
-			err := handler.HandlePacket(p)
+			err := handler.HandlePacket(l, p)
 			if err != nil {
 				return err
 			}

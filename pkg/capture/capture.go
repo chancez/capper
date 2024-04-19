@@ -118,7 +118,7 @@ func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handl
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
-		err := handler.HandlePacket(packet)
+		err := handler.HandlePacket(handle.LinkType(), packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
 		}
