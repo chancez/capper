@@ -179,7 +179,8 @@ func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_StreamCapture
 		if err := stream.Send(&capperpb.StreamCaptureResponse{
 			Data: buf.Bytes(),
 		}); err != nil {
-			if status.Code(err) == codes.Canceled {
+			errCode := status.Code(err)
+			if errCode == codes.Canceled || errCode == codes.Unavailable {
 				return nil
 			}
 			return fmt.Errorf("error sending packet: %w", err)
