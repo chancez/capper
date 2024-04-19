@@ -88,7 +88,9 @@ func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Con
 	}
 
 	log.Info("multi capture started", "interfaces", ifaces, "link_type", handlerLinkType)
-	defer log.Info("multi capture finished", "interfaces", ifaces, "packets", outerCount, "capture_duration", clock.Since(outerStart))
+	defer func() {
+		defer log.Info("multi capture finished", "interfaces", ifaces, "packets", outerCount, "capture_duration", clock.Since(outerStart))
+	}()
 
 	packetsCtx := ctx
 	if conf.CaptureDuration > 0 {
