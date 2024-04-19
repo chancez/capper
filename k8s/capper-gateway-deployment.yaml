@@ -27,7 +27,7 @@ spec:
       containers:
       - name: capper
         image: quay.io/capper/capper:main
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         args:
           - gateway
           - --listen-address
