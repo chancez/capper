@@ -84,11 +84,11 @@ func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handl
 			}
 		}
 
-		log.Debug("starting capture", "interface", iface, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 		handle, err = NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc)
 		if err != nil {
 			return fmt.Errorf("error creating handle: %w", err)
 		}
+		log.Debug("capture started", "interface", iface, "link_type", handle.LinkType(), "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 		return nil
 	}
 
