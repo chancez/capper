@@ -131,11 +131,10 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 		}
 		defer reader.Close()
 
-		fmt.Println("setting link type")
 		// Unset, use the first reader's link type
 		if linkType == layers.LinkTypeNull {
 			linkType = reader.LinkType()
-			fmt.Println("link type:", linkType)
+			s.log.Debug("using first streams linkType", "link_type", linkType)
 		}
 		sources = append(sources, capture.NamedPacketSource{
 			Name:         peer,
