@@ -103,7 +103,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	}
 
 	log.Debug("creating capture stream")
-	stream, err := c.StreamCapture(reqCtx, req)
+	stream, err := c.Capture(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
@@ -145,7 +145,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	return err
 }
 
-func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_StreamCaptureClient) error {
+func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_CaptureClient) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -170,13 +170,13 @@ func handleClientStream(ctx context.Context, handler capture.PacketHandler, stre
 type clientStreamReader struct {
 	pipeReader *io.PipeReader
 	pipeWriter *io.PipeWriter
-	stream     capperpb.Capper_StreamCaptureClient
+	stream     capperpb.Capper_CaptureClient
 
 	pcapReader *pcapgo.Reader
 	errCh      chan error
 }
 
-func newClientStreamReader(stream capperpb.Capper_StreamCaptureClient) (*clientStreamReader, error) {
+func newClientStreamReader(stream capperpb.Capper_CaptureClient) (*clientStreamReader, error) {
 	r, w := io.Pipe()
 	rw := &clientStreamReader{
 		pipeReader: r,

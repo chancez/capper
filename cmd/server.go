@@ -123,30 +123,7 @@ func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (st
 	return netns, nil
 }
 
-func (s *server) Capture(ctx context.Context, req *capperpb.CaptureRequest) (*capperpb.CaptureResponse, error) {
-	netns, err := s.getNetns(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("error getting netns: %w", err)
-	}
-
-	var buf bytes.Buffer
-	writeHandler := capture.NewPcapWriterHandler(&buf, uint32(req.GetSnaplen()))
-
-	conf := capture.Config{
-		Filter:          req.GetFilter(),
-		Snaplen:         int(req.GetSnaplen()),
-		Promisc:         req.GetNoPromiscuousMode(),
-		NumPackets:      req.GetNumPackets(),
-		CaptureDuration: req.GetDuration().AsDuration(),
-		Netns:           netns,
-	}
-	err = capture.StartMulti(ctx, s.log, req.GetInterface(), conf, writeHandler)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
-	}
-	return &capperpb.CaptureResponse{Pcap: buf.Bytes()}, nil
-}
-func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
+func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
 	netns, err := s.getNetns(ctx, req)
 	if err != nil {
@@ -170,13 +147,13 @@ func (s *server) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Cap
 }
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
-// bytes to the given Capper_StreamCaptureServer stream.
-func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_StreamCaptureServer) capture.PacketHandler {
+// bytes to the given Capper_CaptureServer stream.
+func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_CaptureServer) capture.PacketHandler {
 	var buf bytes.Buffer
 	writeHandler := capture.NewPcapWriterHandler(&buf, snaplen)
 	streamHandler := capture.PacketHandlerFunc(func(_ layers.LinkType, p gopacket.Packet) error {
 		// send the packet on the stream
-		if err := stream.Send(&capperpb.StreamCaptureResponse{
+		if err := stream.Send(&capperpb.CaptureResponse{
 			Data: buf.Bytes(),
 		}); err != nil {
 			errCode := status.Code(err)

@@ -8,8 +8,7 @@ package capper;
 option go_package = "github.com/chancez/capper/proto/capper";
 
 service Capper {
-  rpc Capture(CaptureRequest) returns (CaptureResponse) {}
-  rpc StreamCapture(CaptureRequest) returns (stream StreamCaptureResponse) {}
+  rpc Capture(CaptureRequest) returns (stream CaptureResponse) {}
 }
 
 message CaptureRequest {
@@ -30,9 +29,5 @@ message K8sPodFilter {
 }
 
 message CaptureResponse {
-  bytes pcap = 1;
-}
-
-message StreamCaptureResponse {
   bytes data = 1;
 }

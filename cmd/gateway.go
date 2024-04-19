@@ -82,7 +82,7 @@ type gateway struct {
 	connTimeout time.Duration
 }
 
-func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Capper_StreamCaptureServer) error {
+func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
 
 	var peers []string
@@ -118,7 +118,7 @@ func (s *gateway) StreamCapture(req *capperpb.CaptureRequest, stream capperpb.Ca
 		c := capperpb.NewCapperClient(conn)
 
 		s.log.Debug("starting stream", "peer", peer)
-		peerStream, err := c.StreamCapture(ctx, req)
+		peerStream, err := c.Capture(ctx, req)
 		if err != nil {
 			return fmt.Errorf("error creating stream: %w", err)
 		}
