@@ -22,12 +22,12 @@ type captureOpts struct {
 func newCaptureFlags() *pflag.FlagSet {
 	fs := pflag.NewFlagSet("capture-flags", pflag.ExitOnError)
 	fs.StringSliceP("interface", "i", []string{}, "Interface(s) to capture packets on.")
-	fs.IntP("snaplen", "s", 262144, "Configure the snaplength.")
+	fs.IntP("snapshot-length", "s", 262144, "Configure the snaplength.")
 	fs.BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
-	fs.StringP("output", "o", "", "Store output into the file specified.")
+	fs.StringP("output-file", "w", "", "Store output into the file specified.")
 	fs.BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
-	fs.Uint64P("num-packets", "n", 0, "Number of packets to capture.")
-	fs.DurationP("duration", "d", 0, "Duration to capture packets.")
+	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
+	fs.DurationP("capture-duration", "d", 0, "Duration to capture packets.")
 	fs.StringP("netns", "N", "", "Run the capture in the specified network namespace")
 	fs.String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
 	fs.String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
@@ -40,7 +40,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	snaplen, err := fs.GetInt("snaplen")
+	snaplen, err := fs.GetInt("snapshot-length")
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	outputFile, err := fs.GetString("output")
+	outputFile, err := fs.GetString("output-file")
 	if err != nil {
 		return nil, err
 	}
@@ -56,11 +56,11 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	numPackets, err := fs.GetUint64("num-packets")
+	numPackets, err := fs.GetUint64("capture-count")
 	if err != nil {
 		return nil, err
 	}
-	dur, err := fs.GetDuration("duration")
+	dur, err := fs.GetDuration("capture-duration")
 	if err != nil {
 		return nil, err
 	}
