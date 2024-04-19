@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/signal"
 	"time"
 
 	"github.com/chancez/capper/pkg/capture"
@@ -82,9 +81,6 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 }
 
 func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
-	defer stop()
-
 	log.Debug("connecting to server", "server", addr)
 	connCtx := ctx
 	connCancel := func() {}

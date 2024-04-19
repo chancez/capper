@@ -113,7 +113,14 @@ func Start(ctx context.Context, log *slog.Logger, iface string, conf Config, han
 	}
 
 	defer func() {
-		log.Info("capture finished", "interface", iface, "packets", count, "capture_duration", clock.Since(start))
+		logFields := []any{"interface", iface, "packets", count, "capture_duration", clock.Since(start)}
+		stats, err := handle.Stats()
+		if err != nil {
+			log.Error("unable to get capture stats", "interface", iface, "error", err)
+		} else {
+			logFields = append(logFields, "packets_dropped", stats.PacketsDropped, "packets_received", stats.PacketsReceived)
+		}
+		log.Info("capture finished", logFields...)
 		handle.Close()
 	}()
 

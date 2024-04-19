@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/signal"
 
 	"github.com/spf13/cobra"
 )
@@ -16,7 +17,9 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
 	err := rootCmd.ExecuteContext(ctx)
 	if err != nil {
 		slog.Error("capper encountered an error", "error", err)
