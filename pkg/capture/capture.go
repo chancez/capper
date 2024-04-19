@@ -88,7 +88,7 @@ func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handl
 		if err != nil {
 			return fmt.Errorf("error creating handle: %w", err)
 		}
-		log.Debug("capture started", "interface", iface, "link_type", handle.LinkType(), "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
+		log.Info("capture started", "interface", iface, "link_type", handle.LinkType(), "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 		return nil
 	}
 
@@ -105,7 +105,7 @@ func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handl
 	}
 
 	defer func() {
-		log.Debug("capture finished", "interface", iface, "packets", count, "capture_duration", clock.Since(start))
+		log.Info("capture finished", "interface", iface, "packets", count, "capture_duration", clock.Since(start))
 		handle.Close()
 	}()
 
