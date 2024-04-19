@@ -26,8 +26,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: quay.io/capper/capper
-          flavor: |
-              latest=auto
           tags: |
               type=ref,event=branch
               type=ref,event=pr
