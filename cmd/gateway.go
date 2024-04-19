@@ -33,7 +33,15 @@ var gatewayCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runGateway(listen, peers)
+		logLevel, err := cmd.Flags().GetString("log-level")
+		if err != nil {
+			return err
+		}
+		log, err := newLevelLogger(logLevel)
+		if err != nil {
+			return err
+		}
+		return runGateway(log, listen, peers)
 	},
 }
 
@@ -41,16 +49,16 @@ func init() {
 	rootCmd.AddCommand(gatewayCmd)
 	gatewayCmd.Flags().String("listen-address", "127.0.0.1:48999", "Gateway listen address")
 	gatewayCmd.Flags().StringSlice("peers", []string{}, "List of peers")
+	gatewayCmd.Flags().String("log-level", "info", "Configure the log level.")
 }
 
-func runGateway(listen string, peers []string) error {
+func runGateway(logger *slog.Logger, listen string, peers []string) error {
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	logger := slog.Default().With("component", "gateway")
-	slog.SetLogLoggerLevel(slog.LevelDebug)
+	logger = logger.With("component", "gateway")
 
 	s := newGRPCServer(logger, &gateway{
 		clock:       clockwork.NewRealClock(),
@@ -59,7 +67,7 @@ func runGateway(listen string, peers []string) error {
 		connTimeout: 5 * time.Second,
 	})
 
-	slog.Info("starting gateway", "listen-address", listen, "peers", peers)
+	logger.Info("starting gateway", "listen-address", listen, "peers", peers)
 	if err := s.Serve(lis); err != nil {
 		return fmt.Errorf("failed to serve: %w", err)
 	}

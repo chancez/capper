@@ -41,7 +41,17 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 
-		return runServer(listen, enableContainerd)
+		logLevel, err := cmd.Flags().GetString("log-level")
+		if err != nil {
+			return err
+		}
+
+		log, err := newLevelLogger(logLevel)
+		if err != nil {
+			return err
+		}
+
+		return runServer(log, listen, enableContainerd)
 	},
 }
 
@@ -49,16 +59,14 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().String("listen-address", "127.0.0.1:48999", "Server listen address")
 	serverCmd.Flags().Bool("enable-containerd", false, "Enable containerd/Kubernetes integration")
+	serverCmd.Flags().String("log-level", "info", "Configure the log level.")
 }
 
-func runServer(listen string, enableContainerd bool) error {
+func runServer(logger *slog.Logger, listen string, enableContainerd bool) error {
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-
-	logger := slog.Default()
-	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	var containerdClient *containerd.Client
 	if enableContainerd {

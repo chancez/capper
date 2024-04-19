@@ -31,6 +31,7 @@ func init() {
 	localCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
 	localCaptureCmd.Flags().String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
 	localCaptureCmd.Flags().String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
+	localCaptureCmd.Flags().String("log-level", "info", "Configure the log level.")
 }
 
 func runLocalCapture(cmd *cobra.Command, args []string) error {
@@ -79,8 +80,16 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	logLevel, err := cmd.Flags().GetString("log-level")
+	if err != nil {
+		return err
+	}
 
-	log := slog.Default()
+	log, err := newLevelLogger(logLevel)
+	if err != nil {
+		return err
+	}
+
 	ctx := cmd.Context()
 	if k8sNs != "" && k8sPod != "" {
 		containerdSock := "/run/containerd/containerd.sock"

@@ -45,6 +45,7 @@ func init() {
 	remoteCaptureCmd.Flags().StringP("netns", "N", "", "Run the capture in the specified network namespace")
 	remoteCaptureCmd.Flags().String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
 	remoteCaptureCmd.Flags().String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
+	remoteCaptureCmd.Flags().String("log-level", "info", "Configure the log level.")
 }
 
 func runRemoteCapture(cmd *cobra.Command, args []string) error {
@@ -104,6 +105,14 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	logLevel, err := cmd.Flags().GetString("log-level")
+	if err != nil {
+		return err
+	}
+	log, err := newLevelLogger(logLevel)
+	if err != nil {
+		return err
+	}
 
 	req := &capperpb.CaptureRequest{
 		Interface:  device,
@@ -118,7 +127,6 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		},
 		NoPromiscuousMode: noPromisc,
 	}
-	log := slog.Default()
 	return remoteCapture(cmd.Context(), log, addr, connTimeout, reqTimeout, req, outputFile, alwaysPrint)
 }
 
