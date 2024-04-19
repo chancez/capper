@@ -75,8 +75,8 @@ func getInterface() (string, error) {
 	return ifaces[0].Name, nil
 }
 
-// Run a packet capture on the specified interface, calling handler on each packet captured.
-func Run(ctx context.Context, log *slog.Logger, iface string, conf Config, handler PacketHandler) error {
+// Start a packet capture on the specified interface, calling handler on each packet captured.
+func Start(ctx context.Context, log *slog.Logger, iface string, conf Config, handler PacketHandler) error {
 	clock := clockwork.NewRealClock()
 	start := clock.Now()
 	count := uint64(0)
@@ -147,7 +147,7 @@ func Multi(ctx context.Context, log *slog.Logger, ifaces []string, conf Config, 
 		if len(ifaces) == 1 {
 			iface = ifaces[0]
 		}
-		return Run(ctx, log, iface, conf, handler)
+		return Start(ctx, log, iface, conf, handler)
 	}
 	clock := clockwork.NewRealClock()
 
