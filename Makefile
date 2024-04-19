@@ -1,7 +1,7 @@
 GO := go
 GO_LINKER_FLAGS ?=
 GO_BUILD_FLAGS ?=
-IMAGE_TAG := latest
+IMAGE_TAG := main
 DOCKER_FLAGS ?=
 
 all: proto capper
