@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -72,12 +73,18 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf c
 		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputFile != "" {
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return fmt.Errorf("error opening output: %w", err)
+		var w io.Writer
+		if outputFile == "-" {
+			w = os.Stdout
+		} else {
+			f, err := os.Create(outputFile)
+			if err != nil {
+				return fmt.Errorf("error opening output: %w", err)
+			}
+			w = f
+			defer f.Close()
 		}
-		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f, uint32(conf.Snaplen))
+		writeHandler := capture.NewPacketWriterHandler(w, uint32(conf.Snaplen))
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)

@@ -113,12 +113,18 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputFile != "" {
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return fmt.Errorf("error opening output: %w", err)
+		var w io.Writer
+		if outputFile == "-" {
+			w = os.Stdout
+		} else {
+			f, err := os.Create(outputFile)
+			if err != nil {
+				return fmt.Errorf("error opening output: %w", err)
+			}
+			w = f
+			defer f.Close()
 		}
-		defer f.Close()
-		writeHandler := capture.NewPacketWriterHandler(f, uint32(req.GetSnaplen()))
+		writeHandler := capture.NewPacketWriterHandler(w, uint32(req.GetSnaplen()))
 		handlers = append(handlers, writeHandler)
 	}
 	packetsTotal := 0
