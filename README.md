@@ -18,17 +18,16 @@ You can also run the `capper gateway` which acts as a relay that federates queri
 - Limited captures. Specify a number of packets to capture before stopping
 - Capture packets on hosts or in containers
 - Supports targeting Kubernetes pods via containerd integration
+- Support capturing from multiple interfaces
 
 Planned features (in no particular order):
 
-- Support capturing from multiple interfaces
 - Support targeting and capturing from multiple pods
 - Support capturing by namespace without pod names
 - Support capturing by pod labels/namespace labels
 - Support capturing by k8s node name/server hostname
 - Better default output (similar to `tcpdump` or `tshark`)
 - Helm chart
-- Automated image builds
 
 ## Building
 
