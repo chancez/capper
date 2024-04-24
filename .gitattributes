@@ -1,0 +1,4 @@
+*.pb.go             linguist-generated merge=ours
+go.sum              linguist-generated merge=ours
+vendor/*            linguist-vendored
+*/vendor/*          linguist-vendored
