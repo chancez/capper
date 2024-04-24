@@ -68,3 +68,7 @@ docker run --privileged --net=host -v --rm -it ghcr.io/chancez/capper:latest rem
 
 Run `capper --help` for all possible commands, arguments, and flags.
 `capper remote-capture` and `capper local-capture` supports the basic options you would expect from tcpdump.
+
+## Demo
+
+[![asciicast](https://asciinema.org/a/jIKPiveVtiVnF9U10OmRJBYac.svg)](https://asciinema.org/a/jIKPiveVtiVnF9U10OmRJBYac)
