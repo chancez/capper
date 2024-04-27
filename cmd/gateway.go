@@ -148,13 +148,16 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 	mergeBufferSize := len(peers)
 	// merge the contents of the sources
 	merger := capture.NewPacketMerger(s.log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
-	handler := newStreamPacketHandler(uint32(req.GetSnaplen()), stream)
+	handler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
+	if err != nil {
+		return err
+	}
 
 	s.log.Debug("receiving packets from clients")
 	for packet := range merger.PacketsCtx(ctx) {
 		// TODO: stream handler does not use link type and we have multiple link
 		// types due to multiple handles being merged
-		if err := handler.HandlePacket(linkType, packet); err != nil {
+		if err := handler.HandlePacket(packet); err != nil {
 			return err
 		}
 	}

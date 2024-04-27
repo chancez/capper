@@ -108,6 +108,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
+	reader, err := newClientStreamReader(stream)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	linkType := reader.LinkType()
+
 	var handlers []capture.PacketHandler
 	if alwaysPrint || outputFile == "" {
 		handlers = append(handlers, capture.PacketPrinterHandler)
@@ -124,11 +132,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 			w = f
 			defer f.Close()
 		}
-		writeHandler := capture.NewPcapWriterHandler(w, uint32(req.GetSnaplen()))
+		writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
+		if err != nil {
+			return err
+		}
 		handlers = append(handlers, writeHandler)
 	}
 	packetsTotal := 0
-	counterHandler := capture.PacketHandlerFunc(func(layers.LinkType, gopacket.Packet) error {
+	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
 		packetsTotal++
 		return nil
 	})
@@ -138,32 +149,18 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		fmt.Printf("%d packets received\n", packetsTotal)
 	}()
 
-	err = handleClientStream(ctx, handler, stream)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	return err
-}
-
-func handleClientStream(ctx context.Context, handler capture.PacketHandler, stream capperpb.Capper_CaptureClient) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	reader, err := newClientStreamReader(stream)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
-	// before calling link type, need to start reader.
 	packetSource := gopacket.NewPacketSource(reader, reader.LinkType())
 	packetsCh := packetSource.PacketsCtx(ctx)
 
 	for packet := range packetsCh {
-		if err := handler.HandlePacket(reader.LinkType(), packet); err != nil {
+		if err := handler.HandlePacket(packet); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
 		}
 	}
+
 	return nil
 }
 

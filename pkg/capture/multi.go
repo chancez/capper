@@ -8,48 +8,49 @@ import (
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcap"
 	"github.com/jonboulle/clockwork"
 )
 
-// StartMulti starts a packet capture on each of the specified interfaces.
-func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Config, handler PacketHandler) error {
-	// If we don't have multiple interfaces, just delegate to Run()
-	if len(ifaces) < 2 {
-		// Run() handles empty iface by picking one automatically if it's not specified.
-		iface := ""
-		if len(ifaces) == 1 {
-			iface = ifaces[0]
-		}
-		return Start(ctx, log, iface, conf, handler)
-	}
+type MultiCapture struct {
+	log   *slog.Logger
+	clock clockwork.Clock
+	conf  Config
+
+	ifaces  []string
+	handles []*pcap.Handle
+	sources []NamedPacketSource
+}
+
+func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Config) (*MultiCapture, error) {
 	clock := clockwork.NewRealClock()
-
-	outerStart := clock.Now()
-	outerCount := uint64(0)
-
+	var handles []*pcap.Handle
+	var newIfaces []string
 	var sources []NamedPacketSource
 	// We will get the linkType from the first handle, and use that for the
 	// handler provided.
 	var handlerLinkType layers.LinkType
 
-	log.Debug("starting sub-captures", "interfaces", ifaces)
+	if len(ifaces) == 0 {
+		ifaces = []string{""}
+	}
+	log.Debug("creating handles", "interfaces", ifaces)
 	for _, iface := range ifaces {
-		start := clock.Now()
 		// TODO: Count packets for the sub-captures.
-
 		if iface == "" {
 			var err error
 			iface, err = getInterface(conf.Netns)
 			if err != nil {
-				return fmt.Errorf("error getting interface: %w", err)
+				return nil, fmt.Errorf("error getting interface: %w", err)
 			}
 		}
 
+		// TODO: use same linkType on all handles
 		handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
-			return fmt.Errorf("error creating handle: %w", err)
+			return nil, fmt.Errorf("error creating handle: %w", err)
 		}
-		log.Debug("sub-capture started", "interface", iface, "link_type", handle.LinkType(), "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
+		log.Debug("handle created", "interface", iface, "link_type", handle.LinkType())
 
 		// Set the linkType for our PacketHandler to the linkType of the first
 		// handle
@@ -58,48 +59,73 @@ func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Con
 			log.Debug("using first handles linkType", "link_type", handlerLinkType)
 		}
 
+		newIfaces = append(newIfaces, iface)
+		handles = append(handles, handle)
+
 		sources = append(sources, NamedPacketSource{
 			Name: "iface-" + iface,
 			// We use the original handle LinkType in the PacketSource
-			PacketSource: gopacket.NewPacketSource(handle, handle.LinkType()),
+			PacketSource: gopacket.NewPacketSource(handle, handlerLinkType),
 		})
 
-		defer func() {
-			log.Debug("sub-capture finished", "interface", iface, "capture_duration", clock.Since(start))
-			handle.Close()
-		}()
 	}
 
-	log.Info("multi capture started", "interfaces", ifaces, "link_type", handlerLinkType)
+	return &MultiCapture{
+		log:     log,
+		clock:   clock,
+		conf:    conf,
+		ifaces:  newIfaces,
+		handles: handles,
+		sources: sources,
+	}, nil
+}
+
+func (c *MultiCapture) LinkType() layers.LinkType {
+	return c.handles[0].LinkType()
+}
+
+func (c *MultiCapture) Start(ctx context.Context, handler PacketHandler) error {
+	clock := clockwork.NewRealClock()
+
+	start := clock.Now()
+	count := uint64(0)
+
+	c.log.Info("multi capture started", "interfaces", c.ifaces, "link_type", c.LinkType())
 	defer func() {
-		defer log.Info("multi capture finished", "interfaces", ifaces, "packets", outerCount, "capture_duration", clock.Since(outerStart))
+		c.log.Info("multi capture finished", "interfaces", c.ifaces, "packets", count, "capture_duration", clock.Since(start))
 	}()
 
 	packetsCtx := ctx
-	if conf.CaptureDuration > 0 {
+	if c.conf.CaptureDuration > 0 {
 		var packetsCancel context.CancelFunc
-		packetsCtx, packetsCancel = context.WithTimeout(ctx, conf.CaptureDuration)
+		packetsCtx, packetsCancel = context.WithTimeout(ctx, c.conf.CaptureDuration)
 		defer packetsCancel()
 	}
 
 	// Drain at 10 packets, or NumPackets if it's lower than 10
 	heapDrainThreshold := 10
-	if conf.NumPackets > 0 && conf.NumPackets < uint64(heapDrainThreshold) {
-		heapDrainThreshold = int(conf.NumPackets)
+	if c.conf.NumPackets > 0 && c.conf.NumPackets < uint64(heapDrainThreshold) {
+		heapDrainThreshold = int(c.conf.NumPackets)
 	}
 	flushInterval := 2 * time.Second
 	// Scale the merge buffer based on the number of captures
-	mergeBufferSize := 10 * len(sources)
-	merger := NewPacketMerger(log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
+	mergeBufferSize := 10 * len(c.sources)
+	merger := NewPacketMerger(c.log, c.sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
 	for packet := range merger.PacketsCtx(packetsCtx) {
-		if err := handler.HandlePacket(handlerLinkType, packet); err != nil {
+		if err := handler.HandlePacket(packet); err != nil {
 			return err
 		}
-		outerCount++
-		if conf.NumPackets != 0 && outerCount >= conf.NumPackets {
-			log.Debug("reached num_packets limit, stopping capture", "num_packets", conf.NumPackets)
+		count++
+		if c.conf.NumPackets != 0 && count >= c.conf.NumPackets {
+			c.log.Debug("reached num_packets limit, stopping capture", "num_packets", c.conf.NumPackets)
 			break
 		}
 	}
 	return nil
+}
+
+func (c *MultiCapture) Close() {
+	for _, handle := range c.handles {
+		handle.Close()
+	}
 }

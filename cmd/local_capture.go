@@ -68,6 +68,12 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 // empty.
 // If alwaysPrint is true; it prints regardless whether outputFile is empty.
 func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf capture.Config, outputFile string, alwaysPrint bool) error {
+	handle, err := newCapture(ctx, log, ifaces, conf)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	linkType := handle.LinkType()
 	var handlers []capture.PacketHandler
 	if alwaysPrint || outputFile == "" {
 		handlers = append(handlers, capture.PacketPrinterHandler)
@@ -84,14 +90,29 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf c
 			w = f
 			defer f.Close()
 		}
-		writeHandler := capture.NewPcapWriterHandler(w, uint32(conf.Snaplen))
+		writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(conf.Snaplen))
+		if err != nil {
+			return err
+		}
 		handlers = append(handlers, writeHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	err := capture.StartMulti(ctx, log, ifaces, conf, handler)
+	err = handle.Start(ctx, handler)
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
 	return nil
+}
+
+func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf capture.Config) (capture.Capture, error) {
+	if len(ifaces) >= 2 {
+		return capture.NewMulti(ctx, log, ifaces, conf)
+	}
+
+	var iface string
+	if len(ifaces) == 1 {
+		iface = ifaces[0]
+	}
+	return capture.NewBasic(ctx, log, iface, conf)
 }

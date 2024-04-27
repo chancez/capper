@@ -130,7 +130,6 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		return err
 	}
 
-	streamHandler := newStreamPacketHandler(uint32(req.GetSnaplen()), stream)
 	conf := capture.Config{
 		Filter:          req.GetFilter(),
 		Snaplen:         int(req.GetSnaplen()),
@@ -139,7 +138,19 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		CaptureDuration: req.GetDuration().AsDuration(),
 		Netns:           netns,
 	}
-	err = capture.StartMulti(ctx, s.log, req.GetInterface(), conf, streamHandler)
+
+	handle, err := capture.NewMulti(ctx, s.log, req.GetInterface(), conf)
+	if err != nil {
+		return err
+	}
+	defer handle.Close()
+	linkType := handle.LinkType()
+
+	streamHandler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
+	if err != nil {
+		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
+	}
+	err = handle.Start(ctx, streamHandler)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -148,10 +159,13 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_CaptureServer) capture.PacketHandler {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
-	writeHandler := capture.NewPcapWriterHandler(&buf, snaplen)
-	streamHandler := capture.PacketHandlerFunc(func(_ layers.LinkType, p gopacket.Packet) error {
+	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
+	if err != nil {
+		return nil, err
+	}
+	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
 			Data: buf.Bytes(),
@@ -166,7 +180,7 @@ func newStreamPacketHandler(snaplen uint32, stream capperpb.Capper_CaptureServer
 		buf.Reset()
 		return nil
 	})
-	return capture.ChainPacketHandlers(writeHandler, streamHandler)
+	return capture.ChainPacketHandlers(writeHandler, streamHandler), nil
 }
 
 func InterceptorLogger(l *slog.Logger) logging.Logger {

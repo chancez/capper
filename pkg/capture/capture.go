@@ -10,6 +10,7 @@ import (
 
 	"github.com/chancez/capper/pkg/namespaces"
 	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
 	"github.com/jonboulle/clockwork"
 )
@@ -114,56 +115,88 @@ func getInterface(netns string) (string, error) {
 	return runGetIface()
 }
 
-// Start a packet capture on the specified interface, calling handler on each packet captured.
-func Start(ctx context.Context, log *slog.Logger, iface string, conf Config, handler PacketHandler) error {
+type Capture interface {
+	LinkType() layers.LinkType
+	Start(ctx context.Context, handler PacketHandler) error
+	Close()
+}
+
+type BasicCapture struct {
+	log   *slog.Logger
+	clock clockwork.Clock
+	conf  Config
+
+	iface  string
+	handle *pcap.Handle
+}
+
+func NewBasic(ctx context.Context, log *slog.Logger, iface string, conf Config) (*BasicCapture, error) {
 	clock := clockwork.NewRealClock()
-	start := clock.Now()
-	count := uint64(0)
 
 	if iface == "" {
 		var err error
 		iface, err = getInterface(conf.Netns)
 		if err != nil {
-			return fmt.Errorf("error getting interface: %w", err)
+			return nil, fmt.Errorf("error getting interface: %w", err)
 		}
 	}
 
 	handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 	if err != nil {
-		return fmt.Errorf("error creating handle: %w", err)
+		return nil, fmt.Errorf("error creating handle: %w", err)
 	}
-	log.Info("capture started", "interface", iface, "link_type", handle.LinkType(), "snaplen", conf.Snaplen, "promisc", conf.Promisc, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 
+	return &BasicCapture{
+		log:    log,
+		clock:  clock,
+		conf:   conf,
+		iface:  iface,
+		handle: handle,
+	}, nil
+}
+
+func (c *BasicCapture) LinkType() layers.LinkType {
+	return c.handle.LinkType()
+}
+
+func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
+	start := c.clock.Now()
+	count := uint64(0)
+
+	c.log.Info("capture started", "interface", c.iface, "link_type", c.handle.LinkType(), "snaplen", c.conf.Snaplen, "promisc", c.conf.Promisc, "num_packets", c.conf.NumPackets, "duration", c.conf.CaptureDuration)
 	defer func() {
-		logFields := []any{"interface", iface, "packets", count, "capture_duration", clock.Since(start)}
-		stats, err := handle.Stats()
+		logFields := []any{"interface", c.iface, "packets", count, "capture_duration", c.clock.Since(start)}
+		stats, err := c.handle.Stats()
 		if err != nil {
-			log.Error("unable to get capture stats", "interface", iface, "error", err)
+			c.log.Error("unable to get capture stats", "interface", c.iface, "error", err)
 		} else {
 			logFields = append(logFields, "packets_dropped", stats.PacketsDropped, "packets_received", stats.PacketsReceived)
 		}
-		log.Info("capture finished", logFields...)
-		handle.Close()
+		c.log.Info("capture finished", logFields...)
 	}()
 
 	packetsCtx := ctx
-	if conf.CaptureDuration > 0 {
+	if c.conf.CaptureDuration > 0 {
 		var packetsCancel context.CancelFunc
-		packetsCtx, packetsCancel = context.WithTimeout(ctx, conf.CaptureDuration)
+		packetsCtx, packetsCancel = context.WithTimeout(ctx, c.conf.CaptureDuration)
 		defer packetsCancel()
 	}
 
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
-		err := handler.HandlePacket(handle.LinkType(), packet)
+		err := handler.HandlePacket(packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
 		}
 		count++
-		if conf.NumPackets != 0 && count >= conf.NumPackets {
-			log.Debug("reached num_packets limit, stopping capture", "num_packets", conf.NumPackets)
+		if c.conf.NumPackets != 0 && count >= c.conf.NumPackets {
+			c.log.Debug("reached num_packets limit, stopping capture", "num_packets", c.conf.NumPackets)
 			break
 		}
 	}
 	return nil
+}
+
+func (c *BasicCapture) Close() {
+	c.handle.Close()
 }
