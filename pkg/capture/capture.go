@@ -14,7 +14,7 @@ import (
 	"github.com/jonboulle/clockwork"
 )
 
-func NewLiveHandle(iface string, filter string, snaplen int, promisc bool, bufferSize int) (*pcap.Handle, error) {
+func newLiveHandle(iface string, filter string, snaplen int, promisc bool, bufferSize int) (*pcap.Handle, error) {
 	inactive, err := pcap.NewInactiveHandle(iface)
 	if err != nil {
 		return nil, err
@@ -49,7 +49,33 @@ func NewLiveHandle(iface string, filter string, snaplen int, promisc bool, buffe
 			return nil, fmt.Errorf("error setting filter on handle: %w", err)
 		}
 	}
+
 	return handle, nil
+}
+
+func NewLiveHandle(iface string, netns string, filter string, snaplen int, promisc bool, bufferSize int) (*pcap.Handle, error) {
+	runCapture := func() (*pcap.Handle, error) {
+		var err error
+		handle, err := newLiveHandle(iface, filter, snaplen, promisc, bufferSize)
+		if err != nil {
+			return nil, err
+		}
+		return handle, nil
+	}
+
+	if runtime.GOOS == "linux" && netns != "" {
+		runCaptureOld := runCapture
+		runCapture = func() (*pcap.Handle, error) {
+			var handle *pcap.Handle
+			err := namespaces.RunInNetns(func() error {
+				var err error
+				handle, err = runCaptureOld()
+				return err
+			}, netns)
+			return handle, err
+		}
+	}
+	return runCapture()
 }
 
 type Config struct {
@@ -62,16 +88,30 @@ type Config struct {
 	BufferSize      int
 }
 
-func getInterface() (string, error) {
-	ifaces, err := pcap.FindAllDevs()
-	if err != nil {
-		return "", fmt.Errorf("error listing network interfaces: %w", err)
-	}
-	if len(ifaces) == 0 {
-		return "", errors.New("host has no interfaces")
+func getInterface(netns string) (string, error) {
+	runGetIface := func() (string, error) {
+		ifaces, err := pcap.FindAllDevs()
+		if err != nil {
+			return "", fmt.Errorf("error listing network interfaces: %w", err)
+		}
+		if len(ifaces) == 0 {
+			return "", errors.New("host has no interfaces")
 
+		}
+		return ifaces[0].Name, nil
 	}
-	return ifaces[0].Name, nil
+	if runtime.GOOS == "linux" && netns != "" {
+		runGetIface = func() (string, error) {
+			var iface string
+			err := namespaces.RunInNetns(func() error {
+				innerIface, innerErr := runGetIface()
+				iface = innerIface
+				return innerErr
+			}, netns)
+			return iface, err
+		}
+	}
+	return runGetIface()
 }
 
 // Start a packet capture on the specified interface, calling handler on each packet captured.
@@ -80,36 +120,19 @@ func Start(ctx context.Context, log *slog.Logger, iface string, conf Config, han
 	start := clock.Now()
 	count := uint64(0)
 
-	var handle *pcap.Handle
-	runCapture := func() error {
+	if iface == "" {
 		var err error
-		if iface == "" {
-			log.Debug("interface not specified, using first interface")
-			iface, err = getInterface()
-			if err != nil {
-				return fmt.Errorf("error getting interface: %w", err)
-			}
-		}
-
-		handle, err = NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
+		iface, err = getInterface(conf.Netns)
 		if err != nil {
-			return fmt.Errorf("error creating handle: %w", err)
-		}
-		log.Info("capture started", "interface", iface, "link_type", handle.LinkType(), "snaplen", conf.Snaplen, "promisc", conf.Promisc, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
-		return nil
-	}
-
-	if runtime.GOOS == "linux" && conf.Netns != "" {
-		runCaptureOld := runCapture
-		runCapture = func() error {
-			return namespaces.RunInNetns(runCaptureOld, conf.Netns)
+			return fmt.Errorf("error getting interface: %w", err)
 		}
 	}
 
-	err := runCapture()
+	handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating handle: %w", err)
 	}
+	log.Info("capture started", "interface", iface, "link_type", handle.LinkType(), "snaplen", conf.Snaplen, "promisc", conf.Promisc, "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 
 	defer func() {
 		logFields := []any{"interface", iface, "packets", count, "capture_duration", clock.Since(start)}

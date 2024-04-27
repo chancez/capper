@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"runtime"
 	"time"
 
-	"github.com/chancez/capper/pkg/namespaces"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
-	"github.com/gopacket/gopacket/pcap"
 	"github.com/jonboulle/clockwork"
 )
 
@@ -27,28 +24,6 @@ func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Con
 	}
 	clock := clockwork.NewRealClock()
 
-	runCapture := func(iface string) (*pcap.Handle, error) {
-		var err error
-		handle, err := NewLiveHandle(iface, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
-		if err != nil {
-			return nil, fmt.Errorf("error creating handle: %w", err)
-		}
-		return handle, nil
-	}
-
-	if runtime.GOOS == "linux" && conf.Netns != "" {
-		runCaptureOld := runCapture
-		runCapture = func(iface string) (*pcap.Handle, error) {
-			var handle *pcap.Handle
-			err := namespaces.RunInNetns(func() error {
-				var err error
-				handle, err = runCaptureOld(iface)
-				return err
-			}, conf.Netns)
-			return handle, err
-		}
-	}
-
 	outerStart := clock.Now()
 	outerCount := uint64(0)
 
@@ -62,9 +37,17 @@ func StartMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Con
 		start := clock.Now()
 		// TODO: Count packets for the sub-captures.
 
-		handle, err := runCapture(iface)
+		if iface == "" {
+			var err error
+			iface, err = getInterface(conf.Netns)
+			if err != nil {
+				return fmt.Errorf("error getting interface: %w", err)
+			}
+		}
+
+		handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
-			return err
+			return fmt.Errorf("error creating handle: %w", err)
 		}
 		log.Debug("sub-capture started", "interface", iface, "link_type", handle.LinkType(), "num_packets", conf.NumPackets, "duration", conf.CaptureDuration)
 
