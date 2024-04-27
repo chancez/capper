@@ -145,9 +145,6 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	})
 	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
-	defer func() {
-		fmt.Printf("%d packets received\n", packetsTotal)
-	}()
 
 	packetSource := gopacket.NewPacketSource(reader, reader.LinkType())
 	packetsCh := packetSource.PacketsCtx(ctx)
