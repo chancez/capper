@@ -95,9 +95,18 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 			}
 			for _, srv := range records {
 				p = fmt.Sprintf("%s:%d", srv.Target, srv.Port)
+				peers = append(peers, p)
 			}
+		} else {
+			peers = append(peers, p)
 		}
-		peers = append(peers, p)
+	}
+
+	if len(peers) == 0 {
+		s.log.Error("no peers found")
+		return status.Error(codes.Internal, "no peers")
+	} else {
+		s.log.Debug("found peers", "peers", peers)
 	}
 
 	var sources []capture.NamedPacketSource
