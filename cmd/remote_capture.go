@@ -14,6 +14,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
+	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -81,6 +82,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 }
 
 func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
+	clock := clockwork.NewRealClock()
 	log.Debug("connecting to server", "server", addr)
 	connCtx := ctx
 	connCancel := func() {}
@@ -102,11 +104,19 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		defer reqCancel()
 	}
 
+	start := clock.Now()
+	packetsTotal := 0
+
 	log.Debug("creating capture stream")
 	stream, err := c.Capture(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
+
+	log.Info("capture started", "interface", req.GetInterface(), "snaplen", req.GetSnaplen(), "promisc", !req.GetNoPromiscuousMode(), "num_packets", req.GetNumPackets(), "duration", req.GetDuration())
+	defer func() {
+		log.Info("capture finished", "interface", req.GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
+	}()
 
 	reader, err := newClientStreamReader(stream)
 	if err != nil {
@@ -138,7 +148,6 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		}
 		handlers = append(handlers, writeHandler)
 	}
-	packetsTotal := 0
 	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
 		packetsTotal++
 		return nil
@@ -219,7 +228,8 @@ func (rw *clientStreamReader) start() error {
 				rw.errCh <- fmt.Errorf("error reading from stream: %w", err)
 				return
 			}
-			_, err = rw.pipeWriter.Write(resp.GetData())
+			data := resp.GetData()
+			_, err = rw.pipeWriter.Write(data)
 			// User closed the reader, return
 			if err == io.ErrClosedPipe {
 				break
