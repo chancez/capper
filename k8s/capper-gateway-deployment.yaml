@@ -32,8 +32,8 @@ spec:
           - gateway
           - --listen-address
           - 0.0.0.0:48999
-          - --peers
-          - dnssrv+_grpc._tcp.capper-server.default.svc.cluster.local
+          - --dns-srv-peers
+          - _grpc._tcp.capper-server.default.svc.cluster.local
         ports:
           - name: grpc
             containerPort: 48999
