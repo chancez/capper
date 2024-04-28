@@ -129,7 +129,7 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 	ctx := stream.Context()
 	netns, err := s.getNetns(ctx, req)
 	if err != nil {
-		return err
+		return status.Errorf(codes.Internal, "error getting netns: %s", err)
 	}
 
 	conf := capture.Config{
