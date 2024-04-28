@@ -4,10 +4,12 @@ go 1.22.2
 
 require (
 	github.com/containerd/containerd v1.7.15
+	github.com/deckarep/golang-set/v2 v2.6.0
 	github.com/gopacket/gopacket v1.2.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.1.0
 	github.com/jonboulle/clockwork v0.4.0
 	github.com/spf13/cobra v1.8.0
+	github.com/spf13/pflag v1.0.5
 	golang.org/x/sync v0.7.0
 	golang.org/x/sys v0.19.0
 	google.golang.org/grpc v1.63.2
@@ -46,7 +48,6 @@ require (
 	github.com/opencontainers/selinux v1.11.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.45.0 // indirect
 	go.opentelemetry.io/otel v1.19.0 // indirect

@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/jonboulle/clockwork"
@@ -70,13 +70,31 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, staticP
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	peerManager := NewPeerManager(logger.With("subsystem", "peer-manager"), peerDnsQuery, 5*time.Second)
+	pmLogger := logger.With("subsystem", "peer-manager")
+	peerManager := NewPeerManager(pmLogger, peerDnsQuery, 5*time.Second)
+	clientPool := NewPeerClientConnPool(logger.With("subsystem", "client-pool"), 5*time.Second)
+
+	peerManager.checkCallback = func(removed, added []string) {
+		for _, peer := range removed {
+			err := clientPool.Close(peer)
+			if err != nil {
+				pmLogger.Error("unable to closing connection to peer", "peer", peer, "err", err)
+			}
+		}
+		for _, peer := range added {
+			_, err := clientPool.Client(ctx, peer)
+			if err != nil {
+				pmLogger.Error("unable to connect to peer", "peer", peer, "err", err)
+			}
+		}
+	}
+
 	gatewaySrv := newGRPCServer(logger, &gateway{
 		clock:       clockwork.NewRealClock(),
 		staticPeers: staticPeers,
 		log:         logger,
-		connTimeout: 5 * time.Second,
 		peerManager: peerManager,
+		clientPool:  clientPool,
 	})
 
 	eg, ctx := errgroup.WithContext(ctx)
@@ -109,8 +127,8 @@ type gateway struct {
 	clock       clockwork.Clock
 	log         *slog.Logger
 	staticPeers []string
-	connTimeout time.Duration
 	peerManager *PeerManager
+	clientPool  *PeerClientConnPool
 }
 
 func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
@@ -123,29 +141,21 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 	peers = append(peers, dynamicPeers...)
 
 	if len(peers) == 0 {
-		s.log.Error("no peers found")
+		s.log.Error("no peers")
 		return status.Error(codes.Internal, "no peers")
-	} else {
-		s.log.Debug("found peers", "peers", peers)
 	}
+
+	s.log.Debug("found peers", "peers", peers)
 
 	var sources []capture.NamedPacketSource
 	var linkType layers.LinkType
 	for _, peer := range peers {
-		s.log.Debug("connecting to peer", "peer", peer)
-		connCtx := ctx
-		if s.connTimeout != 0 {
-			var connCancel context.CancelFunc
-			connCtx, connCancel = context.WithTimeout(ctx, s.connTimeout)
-			defer connCancel()
-		}
-		conn, err := grpc.DialContext(connCtx, peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := s.clientPool.Client(ctx, peer)
 		if err != nil {
-			return fmt.Errorf("error connecting to peer: %w", err)
+			return err
 		}
-		defer conn.Close()
-		c := capperpb.NewCapperClient(conn)
 
+		c := capperpb.NewCapperClient(conn)
 		s.log.Debug("starting stream", "peer", peer)
 		peerStream, err := c.Capture(ctx, req)
 		if err != nil {
@@ -202,14 +212,75 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 	return nil
 }
 
+type PeerClientConnPool struct {
+	log         *slog.Logger
+	connTimeout time.Duration
+
+	mu          sync.Mutex
+	clientConns map[string]*grpc.ClientConn
+}
+
+func NewPeerClientConnPool(log *slog.Logger, connTimeout time.Duration) *PeerClientConnPool {
+	return &PeerClientConnPool{
+		log:         log,
+		connTimeout: connTimeout,
+		clientConns: make(map[string]*grpc.ClientConn),
+	}
+}
+
+func (pcm *PeerClientConnPool) Client(ctx context.Context, peer string) (*grpc.ClientConn, error) {
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+	conn, ok := pcm.clientConns[peer]
+	if !ok {
+		pcm.log.Debug("connecting to peer", "peer", peer)
+		connCtx := ctx
+		if pcm.connTimeout != 0 {
+			var connCancel context.CancelFunc
+			connCtx, connCancel = context.WithTimeout(ctx, pcm.connTimeout)
+			defer connCancel()
+		}
+		var err error
+		conn, err = grpc.DialContext(connCtx, peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to peer: %w", err)
+		}
+		pcm.log.Info("established connection to peer", "peer", peer)
+		pcm.clientConns[peer] = conn
+	}
+	return conn, nil
+}
+
+func (pcm *PeerClientConnPool) Close(peer string) error {
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+	conn, ok := pcm.clientConns[peer]
+	if !ok {
+		return nil
+	}
+	pcm.log.Debug("closing connection to peer", "peer", peer)
+	return conn.Close()
+}
+
+func (pcm *PeerClientConnPool) CloseAll(peer string) error {
+	pcm.mu.Lock()
+	defer pcm.mu.Unlock()
+	var errs []error
+	for _, conn := range pcm.clientConns {
+		errs = append(errs, conn.Close())
+	}
+	return errors.Join(errs...)
+}
+
 type PeerManager struct {
 	clock clockwork.Clock
 	log   *slog.Logger
 
 	peersMu sync.Mutex
-	peers   []string
+	peers   mapset.Set[string]
 
 	checkInterval time.Duration
+	checkCallback func(removed, added []string)
 	query         string
 }
 
@@ -219,6 +290,7 @@ func NewPeerManager(log *slog.Logger, query string, checkInterval time.Duration)
 		log:           log,
 		query:         query,
 		checkInterval: checkInterval,
+		peers:         mapset.NewSet[string](),
 	}
 }
 
@@ -230,20 +302,24 @@ func (pm *PeerManager) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.Chan():
-			var peers []string
+			peers := mapset.NewSet[string]()
 			_, records, err := net.DefaultResolver.LookupSRV(ctx, "", "", pm.query)
 			if err != nil {
 				pm.log.Error("error resolving peers", "error", err)
 				continue
 			}
 			for _, srv := range records {
-				p := fmt.Sprintf("%s:%d", srv.Target, srv.Port)
-				peers = append(peers, p)
+				peerAddr := fmt.Sprintf("%s:%d", srv.Target, srv.Port)
+				peers.Add(peerAddr)
 			}
 
-			if !slices.Equal(pm.peers, peers) {
+			added := peers.Difference(pm.peers)
+			removed := pm.peers.Difference(peers)
+
+			if added.Cardinality() != 0 || removed.Cardinality() != 0 {
 				pm.peersMu.Lock()
-				pm.log.Debug("updating peers list", "old", pm.peers, "new", peers)
+				pm.log.Debug("updating peers list", "added", added.ToSlice(), "removed", removed.ToSlice(), "peers", peers.ToSlice())
+				pm.checkCallback(removed.ToSlice(), added.ToSlice())
 				pm.peers = peers
 				pm.peersMu.Unlock()
 			}
@@ -254,5 +330,5 @@ func (pm *PeerManager) Start(ctx context.Context) error {
 func (pm *PeerManager) Peers() []string {
 	pm.peersMu.Lock()
 	defer pm.peersMu.Unlock()
-	return pm.peers
+	return pm.peers.ToSlice()
 }
