@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -142,8 +144,17 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 
 		// Unset, use the first reader's link type
 		if linkType == layers.LinkTypeNull {
-			linkType = reader.LinkType()
+			linkType, err = reader.LinkType()
+			if err != nil {
+				return err
+			}
 			s.log.Debug("using first streams linkType", "link_type", linkType)
+
+			header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
+			err = grpc.SendHeader(ctx, header)
+			if err != nil {
+				return status.Errorf(codes.Internal, "error sending header: %s", err)
+			}
 		}
 		sources = append(sources, capture.NamedPacketSource{
 			Name:         peer,

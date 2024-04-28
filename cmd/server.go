@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 
 	"github.com/chancez/capper/pkg/capture"
 	containerdutil "github.com/chancez/capper/pkg/containerd"
@@ -23,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
@@ -145,6 +147,12 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 	}
 	defer handle.Close()
 	linkType := handle.LinkType()
+
+	header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
+	err = grpc.SendHeader(ctx, header)
+	if err != nil {
+		return status.Errorf(codes.Internal, "error sending header: %s", err)
+	}
 
 	streamHandler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
 	if err != nil {

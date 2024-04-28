@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/chancez/capper/pkg/capture"
@@ -124,7 +125,10 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	}
 	defer reader.Close()
 
-	linkType := reader.LinkType()
+	linkType, err := reader.LinkType()
+	if err != nil {
+		return err
+	}
 
 	var handlers []capture.PacketHandler
 	if alwaysPrint || outputFile == "" {
@@ -155,7 +159,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	packetSource := gopacket.NewPacketSource(reader, reader.LinkType())
+	packetSource := gopacket.NewPacketSource(reader, linkType)
 	packetsCh := packetSource.PacketsCtx(ctx)
 
 	for packet := range packetsCh {
@@ -177,6 +181,7 @@ type clientStreamReader struct {
 
 	pcapReader *pcapgo.Reader
 	errCh      chan error
+	linkType   layers.LinkType
 }
 
 func newClientStreamReader(stream capperpb.Capper_CaptureClient) (*clientStreamReader, error) {
@@ -201,12 +206,40 @@ func (rw *clientStreamReader) ReadPacketData() (data []byte, ci gopacket.Capture
 		}
 		return nil, gopacket.CaptureInfo{}, err
 	default:
+		if rw.pcapReader == nil {
+			// NewReader is initialized on the first call of ReadPacketData() instead
+			// of start/newClientStreamReader because it begins reading from the underlying io.Reader
+			// and blocks until there's something to read.
+			pcapReader, err := pcapgo.NewReader(rw.pipeReader)
+			if err != nil {
+				return nil, gopacket.CaptureInfo{}, err
+			}
+			rw.pcapReader = pcapReader
+		}
 		return rw.pcapReader.ReadPacketData()
 	}
 }
 
-func (rw *clientStreamReader) LinkType() layers.LinkType {
-	return rw.pcapReader.LinkType()
+func (rw *clientStreamReader) LinkType() (layers.LinkType, error) {
+	if rw.linkType == 0 {
+		header, err := rw.stream.Header()
+		if err != nil {
+			return 0, fmt.Errorf("error getting header from stream: %w", err)
+		}
+		// TODO: Consider putting the link_type into the gRPC response.
+		linkTypes := header.Get("link_type")
+		if len(linkTypes) == 0 {
+			return 0, errors.New("error getting link_type from stream headers")
+		}
+
+		linkTypeStr := linkTypes[0]
+		linkType, err := strconv.Atoi(linkTypeStr)
+		if err != nil {
+			return 0, fmt.Errorf("error converting link_type: %w", err)
+		}
+		rw.linkType = layers.LinkType(linkType)
+	}
+	return rw.linkType, nil
 }
 
 func (rw *clientStreamReader) Close() error {
@@ -241,11 +274,5 @@ func (rw *clientStreamReader) start() error {
 		}
 		rw.errCh <- nil
 	}()
-
-	pcapReader, err := pcapgo.NewReader(rw.pipeReader)
-	if err != nil {
-		return err
-	}
-	rw.pcapReader = pcapReader
 	return nil
 }
