@@ -78,7 +78,10 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, staticP
 		for _, peer := range removed {
 			err := clientPool.Close(peer)
 			if err != nil {
-				pmLogger.Error("unable to closing connection to peer", "peer", peer, "err", err)
+				// Client closed already
+				if status.Code(err) != codes.Canceled {
+					pmLogger.Error("unable to close connection to peer", "peer", peer, "err", err)
+				}
 			}
 		}
 		for _, peer := range added {
