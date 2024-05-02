@@ -138,10 +138,9 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		Promisc:         req.GetNoPromiscuousMode(),
 		NumPackets:      req.GetNumPackets(),
 		CaptureDuration: req.GetDuration().AsDuration(),
-		Netns:           netns,
 	}
 
-	handle, err := capture.NewMulti(ctx, s.log, req.GetInterface(), conf)
+	handle, err := capture.NewMulti(ctx, s.log, req.GetInterface(), netns, conf)
 	if err != nil {
 		return err
 	}

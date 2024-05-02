@@ -68,11 +68,11 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 
 	req := &capperpb.CaptureRequest{
 		Interface:  captureOpts.Interfaces,
+		Netns:      captureOpts.Netns,
 		Filter:     captureOpts.Filter,
 		Snaplen:    int64(captureOpts.CaptureConfig.Snaplen),
 		NumPackets: captureOpts.CaptureConfig.NumPackets,
 		Duration:   durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
-		Netns:      captureOpts.CaptureConfig.Netns,
 		K8SPodFilter: &capperpb.K8SPodFilter{
 			Namespace: captureOpts.K8sNamespace,
 			Pod:       captureOpts.K8sPod,

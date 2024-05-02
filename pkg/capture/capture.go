@@ -85,7 +85,6 @@ type Config struct {
 	Promisc         bool
 	NumPackets      uint64
 	CaptureDuration time.Duration
-	Netns           string
 	BufferSize      int
 }
 
@@ -130,18 +129,18 @@ type BasicCapture struct {
 	handle *pcap.Handle
 }
 
-func NewBasic(ctx context.Context, log *slog.Logger, iface string, conf Config) (*BasicCapture, error) {
+func NewBasic(ctx context.Context, log *slog.Logger, iface, netns string, conf Config) (*BasicCapture, error) {
 	clock := clockwork.NewRealClock()
 
 	if iface == "" {
 		var err error
-		iface, err = getInterface(conf.Netns)
+		iface, err = getInterface(netns)
 		if err != nil {
 			return nil, fmt.Errorf("error getting interface: %w", err)
 		}
 	}
 
-	handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
+	handle, err := NewLiveHandle(iface, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 	if err != nil {
 		return nil, fmt.Errorf("error creating handle: %w", err)
 	}

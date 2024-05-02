@@ -11,6 +11,7 @@ import (
 type captureOpts struct {
 	Logger        *slog.Logger
 	Interfaces    []string
+	Netns         string
 	Filter        string
 	CaptureConfig capture.Config
 	OutputFile    string
@@ -94,6 +95,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	return &captureOpts{
 		Logger:     log,
 		Interfaces: ifaces,
+		Netns:      netns,
 		Filter:     filter,
 		CaptureConfig: capture.Config{
 			Filter:          filter,
@@ -102,7 +104,6 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 			Promisc:         !noPromisc,
 			NumPackets:      numPackets,
 			CaptureDuration: dur,
-			Netns:           netns,
 		},
 		OutputFile:   outputFile,
 		AlwaysPrint:  alwaysPrint,

@@ -22,7 +22,7 @@ type MultiCapture struct {
 	sources []NamedPacketSource
 }
 
-func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Config) (*MultiCapture, error) {
+func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf Config) (*MultiCapture, error) {
 	clock := clockwork.NewRealClock()
 	var handles []*pcap.Handle
 	var newIfaces []string
@@ -39,14 +39,14 @@ func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, conf Confi
 		// TODO: Count packets for the sub-captures.
 		if iface == "" {
 			var err error
-			iface, err = getInterface(conf.Netns)
+			iface, err = getInterface(netns)
 			if err != nil {
 				return nil, fmt.Errorf("error getting interface: %w", err)
 			}
 		}
 
 		// TODO: use same linkType on all handles
-		handle, err := NewLiveHandle(iface, conf.Netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
+		handle, err := NewLiveHandle(iface, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
 			return nil, fmt.Errorf("error creating handle: %w", err)
 		}

@@ -38,6 +38,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var netns string
 	if captureOpts.K8sNamespace != "" && captureOpts.K8sPod != "" {
 		containerdSock := "/run/containerd/containerd.sock"
 		captureOpts.Logger.Debug("connecting to containerd", "addr", containerdSock)
@@ -48,27 +49,26 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		defer client.Close()
 
 		captureOpts.Logger.Debug("looking up k8s pod in containerd", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace)
-		netns, err := containerd.GetPodNetns(ctx, client, captureOpts.K8sPod, captureOpts.K8sNamespace)
+		netns, err = containerd.GetPodNetns(ctx, client, captureOpts.K8sPod, captureOpts.K8sNamespace)
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
 		if netns == "" {
 			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, captureOpts.K8sPod)
 		}
-		captureOpts.Logger.Debug("configuring netns for pod", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace, "netns", netns)
-
-		captureOpts.CaptureConfig.Netns = netns
+		captureOpts.Logger.Debug("found netns for pod", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace, "netns", netns)
+		captureOpts.Netns = netns
 	}
 
-	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, captureOpts.Netns, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
 // localCapture runs a packet capture and stores the output to the specified file or
 // logs the packets to stdout with the configured logger if outputFile is
 // empty.
 // If alwaysPrint is true; it prints regardless whether outputFile is empty.
-func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf capture.Config, outputFile string, alwaysPrint bool) error {
-	handle, err := newCapture(ctx, log, ifaces, conf)
+func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf capture.Config, outputFile string, alwaysPrint bool) error {
+	handle, err := newCapture(ctx, log, ifaces, netns, conf)
 	if err != nil {
 		return err
 	}
@@ -105,14 +105,14 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf c
 	return nil
 }
 
-func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, conf capture.Config) (capture.Capture, error) {
+func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf capture.Config) (capture.Capture, error) {
 	if len(ifaces) >= 2 {
-		return capture.NewMulti(ctx, log, ifaces, conf)
+		return capture.NewMulti(ctx, log, ifaces, netns, conf)
 	}
 
 	var iface string
 	if len(ifaces) == 1 {
 		iface = ifaces[0]
 	}
-	return capture.NewBasic(ctx, log, iface, conf)
+	return capture.NewBasic(ctx, log, iface, netns, conf)
 }
