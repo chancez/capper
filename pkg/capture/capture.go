@@ -101,10 +101,11 @@ func getInterface(netns string) (string, error) {
 		return ifaces[0].Name, nil
 	}
 	if runtime.GOOS == "linux" && netns != "" {
+		oldGetIface := runGetIface
 		runGetIface = func() (string, error) {
 			var iface string
 			err := namespaces.RunInNetns(func() error {
-				innerIface, innerErr := runGetIface()
+				innerIface, innerErr := oldGetIface()
 				iface = innerIface
 				return innerErr
 			}, netns)
