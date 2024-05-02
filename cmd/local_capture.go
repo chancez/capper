@@ -2,14 +2,18 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/chancez/capper/pkg/containerd"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var localCaptureCmd = &cobra.Command{
@@ -38,7 +42,6 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var netns string
 	if captureOpts.K8sNamespace != "" && captureOpts.K8sPod != "" {
 		containerdSock := "/run/containerd/containerd.sock"
 		captureOpts.Logger.Debug("connecting to containerd", "addr", containerdSock)
@@ -49,7 +52,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		defer client.Close()
 
 		captureOpts.Logger.Debug("looking up k8s pod in containerd", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace)
-		netns, err = containerd.GetPodNetns(ctx, client, captureOpts.K8sPod, captureOpts.K8sNamespace)
+		netns, err := containerd.GetPodNetns(ctx, client, captureOpts.K8sPod, captureOpts.K8sNamespace)
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
@@ -57,10 +60,18 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, captureOpts.K8sPod)
 		}
 		captureOpts.Logger.Debug("found netns for pod", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace, "netns", netns)
-		captureOpts.Netns = netns
+		captureOpts.NetNamespaces = append(captureOpts.NetNamespaces, netns)
 	}
 
-	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, captureOpts.Netns, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	if len(captureOpts.NetNamespaces) > 1 {
+		return localCaptureMultiNamespace(ctx, captureOpts.Logger, captureOpts.Interfaces, captureOpts.NetNamespaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	}
+
+	var netns string
+	if len(captureOpts.NetNamespaces) == 1 {
+		netns = captureOpts.NetNamespaces[0]
+	}
+	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, netns, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
 // localCapture runs a packet capture and stores the output to the specified file or
@@ -101,6 +112,67 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 	err = handle.Start(ctx, handler)
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
+	}
+	return nil
+}
+
+func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []string, netNamespaces []string, conf capture.Config, outputDir string, alwaysPrint bool) error {
+	if len(netNamespaces) < 2 {
+		return errors.New("localCaptureMultiNamespace requires at least 2 namespaces")
+	}
+	fi, err := os.Stat(outputDir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory, multi-namespace capture requires output-file to point to a directory", outputDir)
+	}
+
+	var eg errgroup.Group
+	for _, netns := range netNamespaces {
+		// Create a capture per netns
+		handle, err := newCapture(ctx, log, ifaces, netns, conf)
+		if err != nil {
+			return err
+		}
+		defer handle.Close()
+		linkType := handle.LinkType()
+
+		var handlers []capture.PacketHandler
+		if alwaysPrint || outputDir == "" {
+			handlers = append(handlers, capture.PacketPrinterHandler)
+		}
+		if outputDir != "" {
+			// store each capture into it's own file in the outputDirectory
+			// TODO: Get the interface/auto-detected interfaces
+			fileName := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-") + ".pcap"
+			f, err := os.Create(filepath.Join(outputDir, fileName))
+			if err != nil {
+				return fmt.Errorf("error opening output: %w", err)
+			}
+			defer f.Close()
+			writeHandler, err := capture.NewPcapWriterHandler(f, linkType, uint32(conf.Snaplen))
+			if err != nil {
+				return err
+			}
+			handlers = append(handlers, writeHandler)
+		}
+
+		eg.Go(func() error {
+			err = handle.Start(ctx, capture.ChainPacketHandlers(handlers...))
+			if err != nil {
+				return fmt.Errorf("error occurred while capturing packets: %w", err)
+			}
+			return nil
+		})
+	}
+
+	err = eg.Wait()
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
