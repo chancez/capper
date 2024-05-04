@@ -126,12 +126,15 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 	if len(netNamespaces) < 2 {
 		return errors.New("localCaptureMultiNamespace requires at least 2 namespaces")
 	}
+	if outputDir == "" {
+		return errors.New("--output-file is not specified, multi-namespace capture requires --output-file to point to a directory")
+	}
 	fi, err := os.Stat(outputDir)
 	if err != nil {
 		return err
 	}
 	if !fi.IsDir() {
-		return fmt.Errorf("%s is not a directory, multi-namespace capture requires output-file to point to a directory", outputDir)
+		return fmt.Errorf("%s is not a directory, multi-namespace capture requires --output-file to point to a directory", outputDir)
 	}
 
 	var eg errgroup.Group
