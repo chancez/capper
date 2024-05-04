@@ -84,6 +84,10 @@ func (c *MultiCapture) LinkType() layers.LinkType {
 	return c.handles[0].LinkType()
 }
 
+func (c *MultiCapture) Interfaces() []string {
+	return c.ifaces
+}
+
 func (c *MultiCapture) Start(ctx context.Context, handler PacketHandler) error {
 	clock := clockwork.NewRealClock()
 

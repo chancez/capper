@@ -25,7 +25,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
@@ -127,25 +126,20 @@ type server struct {
 	serf             *serf.Serf
 }
 
-func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (string, error) {
-	k8sNs := req.GetK8SPodFilter().GetNamespace()
-	k8sPod := req.GetK8SPodFilter().GetPod()
-	if k8sNs != "" && k8sPod != "" {
-		if s.containerdClient == nil {
-			return "", status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
-		}
-		s.log.Debug("looking up k8s pod in containerd", "pod", k8sPod, "namespace", k8sNs)
-		podNetns, err := containerdutil.GetPodNetns(ctx, s.containerdClient, k8sPod, k8sNs)
-		if err != nil {
-			return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
-		}
-		if podNetns == "" {
-			return "", status.Errorf(codes.NotFound, "could not find netns for pod '%s/%s'", k8sNs, k8sPod)
-		}
-		s.log.Debug("found netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
-		return podNetns, nil
+func (s *server) getPodNetns(ctx context.Context, pod, namespace string) (string, error) {
+	if s.containerdClient == nil {
+		return "", status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
 	}
-	return "", nil
+	s.log.Debug("looking up k8s pod in containerd", "pod", pod, "namespace", namespace)
+	podNetns, err := containerdutil.GetPodNetns(ctx, s.containerdClient, pod, namespace)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
+	}
+	if podNetns == "" {
+		return "", status.Errorf(codes.NotFound, "could not find netns for pod '%s/%s'", namespace, pod)
+	}
+	s.log.Debug("found netns for pod", "pod", pod, "namespace", namespace, "netns", podNetns)
+	return podNetns, nil
 }
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
@@ -154,9 +148,15 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		return status.Errorf(codes.InvalidArgument, "invalid node_name filter %s, node=%s", req.GetNodeName(), s.nodeName)
 	}
 
-	netns, err := s.getNetns(ctx, req)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error getting netns: %s", err)
+	var netns string
+	pod := req.GetK8SPodFilter().GetPod()
+	namespace := req.GetK8SPodFilter().GetNamespace()
+	if pod != "" && namespace != "" {
+		var err error
+		netns, err = s.getPodNetns(ctx, pod, namespace)
+		if err != nil {
+			return status.Errorf(codes.Internal, "error getting netns: %s", err)
+		}
 	}
 
 	conf := capture.Config{
@@ -167,20 +167,19 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		CaptureDuration: req.GetDuration().AsDuration(),
 	}
 
-	handle, err := capture.NewMulti(ctx, s.log, req.GetInterface(), netns, conf)
+	return s.capture(ctx, req.GetInterface(), netns, conf, stream)
+}
+
+func (s *server) capture(ctx context.Context, ifaces []string, netns string, conf capture.Config, stream capperpb.Capper_CaptureServer) error {
+	handle, err := capture.NewMulti(ctx, s.log, ifaces, netns, conf)
 	if err != nil {
 		return err
 	}
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
-	err = grpc.SendHeader(ctx, header)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error sending header: %s", err)
-	}
-
-	streamHandler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
+	identifier := normalizeFilename(s.nodeName, netns, ifaces)
+	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), identifier, stream)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -193,7 +192,7 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, identifier string, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
 	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
 	if err != nil {
@@ -202,7 +201,9 @@ func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, stream cap
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
-			Data: buf.Bytes(),
+			Identifier: identifier,
+			Data:       buf.Bytes(),
+			LinkType:   int64(linkType),
 		}); err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.Canceled || errCode == codes.Unavailable {

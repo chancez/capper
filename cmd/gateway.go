@@ -4,16 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
@@ -21,7 +18,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -131,7 +127,7 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 					s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
 					return status.Errorf(codes.Unavailable, "node %s status is %s", nodeName, peer.Status)
 				}
-				return s.captureNode(peer, req, stream)
+				return s.captureNode(stream.Context(), peer, req, stream)
 			}
 		}
 		return status.Errorf(codes.InvalidArgument, "unable to find peer for node %s", nodeName)
@@ -141,127 +137,63 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 
 }
 
-func (s *gateway) captureNode(peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
-	ctx := stream.Context()
-
+func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	conn, err := s.getClient(ctx, peer)
 	if err != nil {
 		return err
 	}
 
 	c := capperpb.NewCapperClient(conn)
-	s.log.Debug("starting stream", "peer", peer.Name)
+	s.log.Debug("starting peer stream", "peer", peer.Name)
 	peerStream, err := c.Capture(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
 	// Begins reading from the stream
-	s.log.Debug("reading from client stream", "peer", peer.Name)
-	reader, err := newClientStreamReader(peerStream)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-
-	linkType, err := reader.LinkType()
-	if err != nil {
-		return err
-	}
-	s.log.Debug("setting linkType", "link_type", linkType)
-
-	header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
-	err = grpc.SendHeader(ctx, header)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error sending header: %s", err)
-	}
-
-	handler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
-	if err != nil {
-		return err
-	}
-
-	source := gopacket.NewPacketSource(reader, linkType)
-	s.log.Debug("receiving packets from client")
-	for packet := range source.PacketsCtx(ctx) {
-		// TODO: stream handler does not use link type and we have multiple link
-		// types due to multiple handles being merged
-		if err := handler.HandlePacket(packet); err != nil {
-			return err
+	s.log.Debug("started reading from peer stream", "peer", peer.Name)
+	defer func() {
+		s.log.Debug("finished reading from peer stream", "peer", peer.Name)
+	}()
+	for {
+		resp, err := peerStream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("error receiving from peer stream: %w", err)
+		}
+		err = stream.Send(resp)
+		if status.Code(err) == codes.Canceled {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("error sending data to client stream: %w", err)
 		}
 	}
-	return nil
 }
 
 func (s *gateway) captureMultiNodes(peers []serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
-	ctx := stream.Context()
-
-	var sources []capture.NamedPacketSource
-	var linkType layers.LinkType
+	eg, ctx := errgroup.WithContext(stream.Context())
 	for _, peer := range peers {
+		peer := peer
 		if peer.Status != serf.StatusAlive {
 			s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
 			continue
 		}
-		conn, err := s.getClient(ctx, peer)
-		if err != nil {
-			return err
-		}
-
-		c := capperpb.NewCapperClient(conn)
-		s.log.Debug("starting stream", "peer", peer.Name)
-		peerStream, err := c.Capture(ctx, req)
-		if err != nil {
-			return fmt.Errorf("error creating stream: %w", err)
-		}
-
-		// Begins reading from the stream
-		s.log.Debug("reading from client stream", "peer", peer.Name)
-		reader, err := newClientStreamReader(peerStream)
-		if err != nil {
-			return err
-		}
-		defer reader.Close()
-
-		// Unset, use the first reader's link type
-		if linkType == layers.LinkTypeNull {
-			linkType, err = reader.LinkType()
-			if err != nil {
-				return err
-			}
-			s.log.Debug("using first streams linkType", "link_type", linkType)
-
-			header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
-			err = grpc.SendHeader(ctx, header)
-			if err != nil {
-				return status.Errorf(codes.Internal, "error sending header: %s", err)
-			}
-		}
-		sources = append(sources, capture.NamedPacketSource{
-			Name:         peer.Name,
-			PacketSource: gopacket.NewPacketSource(reader, linkType),
+		eg.Go(func() error {
+			return s.captureNode(ctx, peer, req, stream)
 		})
 	}
-
-	s.log.Debug("starting packet merger")
-	heapDrainThreshold := 10 * len(peers)
-	flushInterval := time.Duration(2*len(peers)) * time.Second
-	mergeBufferSize := len(peers)
-	// merge the contents of the sources
-	source := capture.NewPacketMerger(s.log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
-
-	handler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
+	err := eg.Wait()
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
 	if err != nil {
 		return err
-	}
-
-	s.log.Debug("receiving packets from clients")
-	for packet := range source.PacketsCtx(ctx) {
-		// TODO: stream handler does not use link type and we have multiple link
-		// types due to multiple handles being merged
-		if err := handler.HandlePacket(packet); err != nil {
-			return err
-		}
 	}
 	return nil
 }

@@ -30,4 +30,6 @@ message K8sPodFilter {
 
 message CaptureResponse {
   bytes data = 1;
+  string identifier = 2;
+  int64 link_type = 3;
 }

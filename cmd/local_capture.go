@@ -117,7 +117,19 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 		if outputFile == "-" {
 			w = os.Stdout
 		} else {
-			f, err := os.Create(outputFile)
+			fi, err := os.Stat(outputFile)
+			if err != nil {
+				return err
+			}
+
+			fileName := outputFile
+			// if the output is a directory, generate a filename and store it in that directory
+			if fi.IsDir() {
+				outputDir := outputFile
+				hostname, _ := os.Hostname()
+				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interfaces()))
+			}
+			f, err := os.Create(fileName)
 			if err != nil {
 				return fmt.Errorf("error opening output: %w", err)
 			}
@@ -170,8 +182,8 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 		}
 		if outputDir != "" {
 			// store each capture into it's own file in the outputDirectory
-			// TODO: Get the interface/auto-detected interfaces
-			fileName := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-") + ".pcap"
+			hostname, _ := os.Hostname()
+			fileName := normalizeFilename(hostname, netns, handle.Interfaces())
 			f, err := os.Create(filepath.Join(outputDir, fileName))
 			if err != nil {
 				return fmt.Errorf("error opening output: %w", err)
@@ -213,4 +225,14 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 		iface = ifaces[0]
 	}
 	return capture.NewBasic(ctx, log, iface, netns, conf)
+}
+
+func normalizeFilename(host string, netns string, ifaces []string) string {
+	ifaceStr := strings.Join(ifaces, ",")
+	if runtime.GOOS != "linux" {
+		return fmt.Sprintf("host:%s:ifaces:%s.pcap", host, ifaceStr)
+
+	}
+	netnsStr := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-")
+	return fmt.Sprintf("host:%s:netns:%s:ifaces:%s.pcap", host, netnsStr, ifaceStr)
 }

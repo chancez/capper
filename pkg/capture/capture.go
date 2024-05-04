@@ -118,6 +118,7 @@ func getInterface(netns string) (string, error) {
 type Capture interface {
 	LinkType() layers.LinkType
 	Start(ctx context.Context, handler PacketHandler) error
+	Interfaces() []string
 	Close()
 }
 
@@ -157,6 +158,10 @@ func NewBasic(ctx context.Context, log *slog.Logger, iface, netns string, conf C
 
 func (c *BasicCapture) LinkType() layers.LinkType {
 	return c.handle.LinkType()
+}
+
+func (c *BasicCapture) Interfaces() []string {
+	return []string{c.iface}
 }
 
 func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {

@@ -7,7 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strconv"
+	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/chancez/capper/pkg/capture"
@@ -17,6 +18,7 @@ import (
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -88,6 +90,22 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 }
 
 func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
+	var outputDir string
+	if outputFile != "" {
+		fi, err := os.Stat(outputFile)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil && fi.IsDir() {
+			outputDir = outputFile
+		}
+	}
+
+	printPackets := outputFile == "" || alwaysPrint
+	// merging packets is required to print them or send them to a non-directory file output
+	singleFileOutput := (outputFile != "" && outputDir == "")
+	mergePackets := printPackets || singleFileOutput
+
 	clock := clockwork.NewRealClock()
 	log.Debug("connecting to server", "server", addr)
 	connCtx := ctx
@@ -124,160 +142,206 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		log.Info("capture finished", "interface", req.GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
 	}()
 
-	reader, err := newClientStreamReader(stream)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
+	linkTypeCh := make(chan layers.LinkType)
 
-	linkType, err := reader.LinkType()
-	if err != nil {
-		return err
-	}
+	var eg *errgroup.Group
+	eg, ctx = errgroup.WithContext(ctx)
+	var merger *capture.PacketMerger
+	if mergePackets {
+		log.Debug("starting packet merger")
+		heapDrainThreshold := 10
+		flushInterval := time.Second
+		mergeBufferSize := 100
+		merger = capture.NewPacketMerger(log, nil, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
 
-	var handlers []capture.PacketHandler
-	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, capture.PacketPrinterHandler)
-	}
-	if outputFile != "" {
-		var w io.Writer
-		if outputFile == "-" {
-			w = os.Stdout
-		} else {
-			f, err := os.Create(outputFile)
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
+		eg.Go(func() error {
+			var handlers []capture.PacketHandler
+			if printPackets {
+				handlers = append(handlers, capture.PacketPrinterHandler)
 			}
-			w = f
-			defer f.Close()
-		}
-		writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
-		if err != nil {
-			return err
-		}
-		handlers = append(handlers, writeHandler)
+
+			if singleFileOutput {
+				var writer io.Writer
+				if outputFile == "-" {
+					writer = os.Stdout
+				} else {
+					f, err := os.Create(outputFile)
+					if err != nil {
+						return fmt.Errorf("error opening output: %w", err)
+					}
+					writer = f
+					defer f.Close()
+				}
+
+				// We need the linkType to create the writer.
+				// This will be set based on the first packet's linkType when we
+				// receive it from the stream
+				var linkType layers.LinkType
+				if linkType == layers.LinkTypeNull {
+					select {
+					case linkType = <-linkTypeCh:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+
+				writeHandler, err := capture.NewPcapWriterHandler(writer, linkType, uint32(req.GetSnaplen()))
+				if err != nil {
+					return err
+				}
+				handlers = append(handlers, writeHandler)
+			}
+			handler := capture.ChainPacketHandlers(handlers...)
+			for packet := range merger.PacketsCtx(ctx) {
+				if err := handler.HandlePacket(packet); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	}
-	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
-		packetsTotal++
-		return nil
-	})
-	handlers = append(handlers, counterHandler)
-	handler := capture.ChainPacketHandlers(handlers...)
 
-	packetSource := gopacket.NewPacketSource(reader, linkType)
-	packetsCh := packetSource.PacketsCtx(ctx)
-
-	for packet := range packetsCh {
-		if err := handler.HandlePacket(packet); err != nil {
-			if errors.Is(err, io.EOF) {
+	eg.Go(func() error {
+		configuredLinkType := false
+		writers := make(map[string]io.Writer)
+		for {
+			// Read packets from the gRPC stream and send them to the reader via the pipeWriter
+			resp, err := stream.Recv()
+			if status.Code(err) == codes.Canceled {
 				return nil
 			}
-			return err
-		}
-	}
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("error reading from stream: %w", err)
+			}
 
+			// Every gRPC message contains a single packet
+			packetsTotal++
+
+			identifier := resp.GetIdentifier()
+			data := resp.GetData()
+			linkType := layers.LinkType(resp.GetLinkType())
+
+			// When writing to a file, we need to know the linkType so we can write the header,
+			// so send it to the merger.
+			if singleFileOutput && !configuredLinkType {
+				linkTypeCh <- linkType
+				configuredLinkType = true
+				close(linkTypeCh)
+			}
+
+			// Get the writer for the given packet source
+			writer, exists := writers[identifier]
+			if !exists {
+				// If we're merging packets, we need to parse them and send them to the merger.
+				if mergePackets {
+					// Create a pipe that our pcapReader can read from, and set the
+					// writer for this identity to the pipeWriter which in turn, will
+					// write to the pcapReader that the merger is reading from.
+					pipeReader, pipeWriter := io.Pipe()
+					// These will be closed when the goroutine returns, resulting in the
+					// PacketsCtx below returning.
+					defer pipeWriter.Close()
+					defer pipeReader.Close()
+					writer = pipeWriter
+
+					pcapReader, err := newLazyPcapReader(pipeReader)
+					if err != nil {
+						return err
+					}
+
+					src := gopacket.NewPacketSource(pcapReader, linkType)
+					merger.AddSource(capture.NamedPacketSource{
+						Name:         identifier,
+						PacketSource: src,
+					})
+
+				} else if outputDir != "" {
+					// If we're writing to a directory, then store each output stream into
+					// it's own file in the specified directory.
+					// If we're writing to a single file, that's handled in the merger goroutine instead.
+
+					// The packet identifier is the file name, it contains the peer
+					// hostname, netns, and interface and the .pcap extension.
+					f, err := os.Create(filepath.Join(outputDir, identifier))
+					if err != nil {
+						return fmt.Errorf("error opening output: %w", err)
+					}
+					defer f.Close()
+					writer = f
+				}
+
+				writers[identifier] = writer
+			}
+
+			// Write to our final destination.
+			_, err = writer.Write(data)
+			if err != nil {
+				return err
+			}
+		}
+	})
+
+	err = eg.Wait()
+	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-type clientStreamReader struct {
-	pipeReader *io.PipeReader
-	pipeWriter *io.PipeWriter
-	stream     capperpb.Capper_CaptureClient
+// LazyPcapReader is a pcapgo.Reader but it does not read from the provided
+// io.Reader until ReadPacketData is called.
+type LazyPcapReader struct {
+	reader io.Reader
+
+	once *sync.Once
+	err  error
 
 	pcapReader *pcapgo.Reader
-	errCh      chan error
-	linkType   layers.LinkType
 }
 
-func newClientStreamReader(stream capperpb.Capper_CaptureClient) (*clientStreamReader, error) {
-	r, w := io.Pipe()
-	rw := &clientStreamReader{
-		pipeReader: r,
-		pipeWriter: w,
-		stream:     stream,
-	}
-	// begin reading from the stream and create the pcapReader
-	if err := rw.start(); err != nil {
-		return nil, err
+func newLazyPcapReader(r io.Reader) (*LazyPcapReader, error) {
+	rw := &LazyPcapReader{
+		reader: r,
+		once:   &sync.Once{},
 	}
 	return rw, nil
 }
 
-func (rw *clientStreamReader) ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error) {
-	select {
-	case err, ok := <-rw.errCh:
-		if !ok {
-			err = io.EOF
+func (r *LazyPcapReader) init() {
+	if r.pcapReader == nil {
+		// NewReader is initialized on the first call of one of it's method instead
+		// of at initialization because it begin to read from the underlying io.Reader
+		// and blocks until there's something to read.
+		pcapReader, err := pcapgo.NewReader(r.reader)
+		if err != nil {
+			r.err = err
 		}
+		r.pcapReader = pcapReader
+	}
+}
+
+func (r *LazyPcapReader) ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error) {
+	r.once.Do(r.init)
+	if r.err != nil {
 		return nil, gopacket.CaptureInfo{}, err
-	default:
-		if rw.pcapReader == nil {
-			// NewReader is initialized on the first call of ReadPacketData() instead
-			// of start/newClientStreamReader because it begins reading from the underlying io.Reader
-			// and blocks until there's something to read.
-			pcapReader, err := pcapgo.NewReader(rw.pipeReader)
-			if err != nil {
-				return nil, gopacket.CaptureInfo{}, err
-			}
-			rw.pcapReader = pcapReader
-		}
-		return rw.pcapReader.ReadPacketData()
 	}
+	return r.pcapReader.ReadPacketData()
 }
 
-func (rw *clientStreamReader) LinkType() (layers.LinkType, error) {
-	if rw.linkType == 0 {
-		header, err := rw.stream.Header()
-		if err != nil {
-			return 0, fmt.Errorf("error getting header from stream: %w", err)
-		}
-		// TODO: Consider putting the link_type into the gRPC response.
-		linkTypes := header.Get("link_type")
-		if len(linkTypes) == 0 {
-			return 0, errors.New("error getting link_type from stream headers")
-		}
-
-		linkTypeStr := linkTypes[0]
-		linkType, err := strconv.Atoi(linkTypeStr)
-		if err != nil {
-			return 0, fmt.Errorf("error converting link_type: %w", err)
-		}
-		rw.linkType = layers.LinkType(linkType)
-	}
-	return rw.linkType, nil
+// // LinkType returns network, as a layers.LinkType.
+func (r *LazyPcapReader) LinkType() layers.LinkType {
+	r.once.Do(r.init)
+	return r.pcapReader.LinkType()
 }
 
-func (rw *clientStreamReader) Close() error {
-	return rw.pipeReader.Close()
-}
-
-func (rw *clientStreamReader) start() error {
-	rw.errCh = make(chan error, 1)
-	go func() {
-		defer close(rw.errCh)
-		defer rw.pipeWriter.Close()
-		for {
-			// Read packets from the gRPC stream and send them to the reader via the pipeWriter
-			resp, err := rw.stream.Recv()
-			if status.Code(err) == codes.Canceled {
-				break
-			}
-			if err != nil {
-				rw.errCh <- fmt.Errorf("error reading from stream: %w", err)
-				return
-			}
-			data := resp.GetData()
-			_, err = rw.pipeWriter.Write(data)
-			// User closed the reader, return
-			if err == io.ErrClosedPipe {
-				break
-			}
-			if err != nil {
-				rw.errCh <- fmt.Errorf("error writing data to pipe: %w", err)
-				return
-			}
-		}
-		rw.errCh <- nil
-	}()
-	return nil
+// Snaplen returns the snapshot length of the capture file.
+func (r *LazyPcapReader) Snaplen() uint32 {
+	r.once.Do(r.init)
+	return r.pcapReader.Snaplen()
 }
