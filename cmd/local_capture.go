@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/chancez/capper/pkg/capture"
@@ -46,6 +47,22 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	netNamespaces, err := cmd.Flags().GetStringSlice("netns")
 	if err != nil {
 		return err
+	}
+
+	// Validate certain flags are only used on Linux
+	if runtime.GOOS != "linux" {
+		var flag string
+		switch {
+		case len(netNamespaces) > 0:
+			flag = "--netns"
+		case captureOpts.K8sPod != "":
+			flag = "--k8s-pod"
+		case captureOpts.K8sNamespace != "":
+			flag = "--k8s-namespace"
+		}
+		if flag != "" {
+			return fmt.Errorf("%s is only valid on Linux", flag)
+		}
 	}
 
 	if captureOpts.K8sNamespace != "" && captureOpts.K8sPod != "" {
