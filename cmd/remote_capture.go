@@ -66,17 +66,8 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	var netns string
-	if len(captureOpts.NetNamespaces) > 1 {
-		return errors.New("remote capture only supports a single netns")
-	}
-	if len(captureOpts.NetNamespaces) == 1 {
-		netns = captureOpts.NetNamespaces[0]
-	}
-
 	req := &capperpb.CaptureRequest{
 		Interface:  captureOpts.Interfaces,
-		Netns:      netns,
 		Filter:     captureOpts.Filter,
 		Snaplen:    int64(captureOpts.CaptureConfig.Snaplen),
 		NumPackets: captureOpts.CaptureConfig.NumPackets,

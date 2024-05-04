@@ -11,7 +11,6 @@ import (
 type captureOpts struct {
 	Logger        *slog.Logger
 	Interfaces    []string
-	NetNamespaces []string
 	Filter        string
 	CaptureConfig capture.Config
 	OutputFile    string
@@ -30,7 +29,6 @@ func newCaptureFlags() *pflag.FlagSet {
 	fs.BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
 	fs.DurationP("capture-duration", "d", 0, "Duration to capture packets.")
-	fs.StringSliceP("netns", "N", []string{}, "Run the capture in the specified network namespaces")
 	fs.String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
 	fs.String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
 	fs.String("log-level", "info", "Configure the log level.")
@@ -70,10 +68,6 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	netns, err := fs.GetStringSlice("netns")
-	if err != nil {
-		return nil, err
-	}
 	k8sPod, err := fs.GetString("k8s-pod")
 	if err != nil {
 		return nil, err
@@ -93,10 +87,9 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	}
 
 	return &captureOpts{
-		Logger:        log,
-		Interfaces:    ifaces,
-		NetNamespaces: netns,
-		Filter:        filter,
+		Logger:     log,
+		Interfaces: ifaces,
+		Filter:     filter,
 		CaptureConfig: capture.Config{
 			Filter:          filter,
 			Snaplen:         snaplen,

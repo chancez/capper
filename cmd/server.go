@@ -103,7 +103,6 @@ type server struct {
 }
 
 func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (string, error) {
-	netns := req.GetNetns()
 	k8sNs := req.GetK8SPodFilter().GetNamespace()
 	k8sPod := req.GetK8SPodFilter().GetPod()
 	if k8sNs != "" && k8sPod != "" {
@@ -115,14 +114,13 @@ func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (st
 		if err != nil {
 			return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
 		}
-		if netns == "" {
-			s.log.Debug("could not find netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
-		} else {
-			netns = podNetns
-			s.log.Debug("configuring netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+		if podNetns == "" {
+			return "", status.Errorf(codes.NotFound, "could not find netns for pod '%s/%s'", k8sNs, k8sPod)
 		}
+		s.log.Debug("found netns for pod", "pod", k8sPod, "namespace", k8sNs, "netns", podNetns)
+		return podNetns, nil
 	}
-	return netns, nil
+	return "", nil
 }
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {

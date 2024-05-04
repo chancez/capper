@@ -27,6 +27,7 @@ func init() {
 	rootCmd.AddCommand(localCaptureCmd)
 	captureFlags := newCaptureFlags()
 	localCaptureCmd.Flags().AddFlagSet(captureFlags)
+	localCaptureCmd.Flags().StringSliceP("netns", "N", []string{}, "Run the capture in the specified network namespaces")
 }
 
 func runLocalCapture(cmd *cobra.Command, args []string) error {
@@ -38,6 +39,11 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	captureOpts, err := getCaptureOpts(ctx, filter, cmd.Flags())
+	if err != nil {
+		return err
+	}
+
+	netNamespaces, err := cmd.Flags().GetStringSlice("netns")
 	if err != nil {
 		return err
 	}
@@ -60,16 +66,16 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, captureOpts.K8sPod)
 		}
 		captureOpts.Logger.Debug("found netns for pod", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace, "netns", netns)
-		captureOpts.NetNamespaces = append(captureOpts.NetNamespaces, netns)
+		netNamespaces = append(netNamespaces, netns)
 	}
 
-	if len(captureOpts.NetNamespaces) > 1 {
-		return localCaptureMultiNamespace(ctx, captureOpts.Logger, captureOpts.Interfaces, captureOpts.NetNamespaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	if len(netNamespaces) > 1 {
+		return localCaptureMultiNamespace(ctx, captureOpts.Logger, captureOpts.Interfaces, netNamespaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 	}
 
 	var netns string
-	if len(captureOpts.NetNamespaces) == 1 {
-		netns = captureOpts.NetNamespaces[0]
+	if len(netNamespaces) == 1 {
+		netns = netNamespaces[0]
 	}
 	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, netns, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
