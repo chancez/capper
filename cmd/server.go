@@ -53,7 +53,7 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 
-		return runServer(log, listen, enableContainerd)
+		return runServer(cmd.Context(), log, listen, enableContainerd)
 	},
 }
 
@@ -64,7 +64,7 @@ func init() {
 	serverCmd.Flags().String("log-level", "info", "Configure the log level.")
 }
 
-func runServer(logger *slog.Logger, listen string, enableContainerd bool) error {
+func runServer(ctx context.Context, logger *slog.Logger, listen string, enableContainerd bool) error {
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
@@ -88,7 +88,14 @@ func runServer(logger *slog.Logger, listen string, enableContainerd bool) error 
 		containerdClient: containerdClient,
 	})
 
-	slog.Info("starting server", "listen-address", listen)
+	go func() {
+		<-ctx.Done()
+		logger.Info("got signal, shutting down server")
+		s.GracefulStop()
+	}()
+
+	logger.Info("starting server", "listen-address", listen)
+	defer logger.Info("server has exited")
 	if err := s.Serve(lis); err != nil {
 		return fmt.Errorf("failed to serve: %w", err)
 	}
