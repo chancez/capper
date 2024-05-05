@@ -25,7 +25,6 @@ Planned features (in no particular order):
 - Support targeting and capturing from multiple pods
 - Support capturing by namespace without pod names
 - Support capturing by pod labels/namespace labels
-- Support capturing by k8s node name/server hostname
 - Better default output (similar to `tcpdump` or `tshark`)
 - Helm chart
 

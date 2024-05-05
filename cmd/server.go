@@ -89,6 +89,7 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts
 		defer containerdClient.Close()
 	}
 
+	logger.Info("starting serf", "listen", serfOpts.ListenAddr, "node-name", serfOpts.NodeName, "peers", serfOpts.Peers)
 	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "server")
 	if err != nil {
 		return fmt.Errorf("error creating serf cluster: %w", err)
@@ -149,6 +150,10 @@ func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (st
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
+	if req.GetNodeName() != "" && req.GetNodeName() != s.nodeName {
+		return status.Errorf(codes.InvalidArgument, "invalid node_name filter %s, node=%s", req.GetNodeName(), s.nodeName)
+	}
+
 	netns, err := s.getNetns(ctx, req)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error getting netns: %s", err)

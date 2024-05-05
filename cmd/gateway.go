@@ -71,6 +71,7 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, serfOpt
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
+	logger.Info("starting serf", "listen", serfOpts.ListenAddr, "node-name", serfOpts.NodeName, "peers", serfOpts.Peers)
 	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "gateway")
 	if err != nil {
 		return fmt.Errorf("error creating serf cluster: %w", err)
@@ -116,44 +117,106 @@ type gateway struct {
 }
 
 func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
-	ctx := stream.Context()
-
-	members := s.serf.Members()
-
-	var peers []string
-	for _, member := range members {
-		// Only connect to capper servers
-		if role, ok := member.Tags["role"]; !ok || role != "server" {
-			continue
-		}
-		peerAddr := net.JoinHostPort(member.Addr.String(), s.peerServerPort)
-		peers = append(peers, peerAddr)
-	}
-
+	peers := s.getPeers()
 	if len(peers) == 0 {
 		s.log.Error("no peers")
 		return status.Error(codes.Internal, "no peers")
 	}
-
 	s.log.Debug("found peers", "peers", peers)
+
+	if nodeName := req.GetNodeName(); nodeName != "" {
+		for _, peer := range peers {
+			if peer.Name == nodeName {
+				if peer.Status != serf.StatusAlive {
+					s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
+					return status.Errorf(codes.Unavailable, "node %s status is %s", nodeName, peer.Status)
+				}
+				return s.captureNode(peer, req, stream)
+			}
+		}
+		return status.Errorf(codes.InvalidArgument, "unable to find peer for node %s", nodeName)
+	}
+
+	return s.captureMultiNodes(peers, req, stream)
+
+}
+
+func (s *gateway) captureNode(peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
+	ctx := stream.Context()
+
+	conn, err := s.getClient(ctx, peer)
+	if err != nil {
+		return err
+	}
+
+	c := capperpb.NewCapperClient(conn)
+	s.log.Debug("starting stream", "peer", peer.Name)
+	peerStream, err := c.Capture(ctx, req)
+	if err != nil {
+		return fmt.Errorf("error creating stream: %w", err)
+	}
+
+	// Begins reading from the stream
+	s.log.Debug("reading from client stream", "peer", peer.Name)
+	reader, err := newClientStreamReader(peerStream)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	linkType, err := reader.LinkType()
+	if err != nil {
+		return err
+	}
+	s.log.Debug("setting linkType", "link_type", linkType)
+
+	header := metadata.Pairs("link_type", strconv.Itoa(int(linkType)))
+	err = grpc.SendHeader(ctx, header)
+	if err != nil {
+		return status.Errorf(codes.Internal, "error sending header: %s", err)
+	}
+
+	handler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
+	if err != nil {
+		return err
+	}
+
+	source := gopacket.NewPacketSource(reader, linkType)
+	s.log.Debug("receiving packets from client")
+	for packet := range source.PacketsCtx(ctx) {
+		// TODO: stream handler does not use link type and we have multiple link
+		// types due to multiple handles being merged
+		if err := handler.HandlePacket(packet); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *gateway) captureMultiNodes(peers []serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
+	ctx := stream.Context()
 
 	var sources []capture.NamedPacketSource
 	var linkType layers.LinkType
 	for _, peer := range peers {
-		conn, err := s.clientPool.Client(ctx, peer)
+		if peer.Status != serf.StatusAlive {
+			s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
+			continue
+		}
+		conn, err := s.getClient(ctx, peer)
 		if err != nil {
 			return err
 		}
 
 		c := capperpb.NewCapperClient(conn)
-		s.log.Debug("starting stream", "peer", peer)
+		s.log.Debug("starting stream", "peer", peer.Name)
 		peerStream, err := c.Capture(ctx, req)
 		if err != nil {
 			return fmt.Errorf("error creating stream: %w", err)
 		}
 
 		// Begins reading from the stream
-		s.log.Debug("reading from client stream", "peer", peer)
+		s.log.Debug("reading from client stream", "peer", peer.Name)
 		reader, err := newClientStreamReader(peerStream)
 		if err != nil {
 			return err
@@ -175,7 +238,7 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 			}
 		}
 		sources = append(sources, capture.NamedPacketSource{
-			Name:         peer,
+			Name:         peer.Name,
 			PacketSource: gopacket.NewPacketSource(reader, linkType),
 		})
 	}
@@ -185,14 +248,15 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 	flushInterval := time.Duration(2*len(peers)) * time.Second
 	mergeBufferSize := len(peers)
 	// merge the contents of the sources
-	merger := capture.NewPacketMerger(s.log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
+	source := capture.NewPacketMerger(s.log, sources, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
+
 	handler, err := newStreamPacketHandler(linkType, uint32(req.GetSnaplen()), stream)
 	if err != nil {
 		return err
 	}
 
 	s.log.Debug("receiving packets from clients")
-	for packet := range merger.PacketsCtx(ctx) {
+	for packet := range source.PacketsCtx(ctx) {
 		// TODO: stream handler does not use link type and we have multiple link
 		// types due to multiple handles being merged
 		if err := handler.HandlePacket(packet); err != nil {
@@ -200,6 +264,26 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 		}
 	}
 	return nil
+}
+
+func (s *gateway) getPeers() []serf.Member {
+	var peers []serf.Member
+	for _, member := range s.serf.Members() {
+		// Only connect to capper servers
+		if role, ok := member.Tags["role"]; !ok || role != "server" {
+			continue
+		}
+		peers = append(peers, member)
+	}
+	return peers
+}
+
+func (s *gateway) getPeerAddress(member serf.Member) string {
+	return net.JoinHostPort(member.Addr.String(), s.peerServerPort)
+}
+
+func (s *gateway) getClient(ctx context.Context, peer serf.Member) (*grpc.ClientConn, error) {
+	return s.clientPool.Client(ctx, s.getPeerAddress(peer))
 }
 
 type PeerClientConnPool struct {

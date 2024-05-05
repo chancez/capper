@@ -36,6 +36,7 @@ func init() {
 	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
 	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
 	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
+	remoteCaptureCmd.Flags().String("node-name", "", "Run the capture on a specific node")
 	captureFlags := newCaptureFlags()
 	remoteCaptureCmd.Flags().AddFlagSet(captureFlags)
 }
@@ -60,6 +61,10 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	nodeName, err := cmd.Flags().GetString("node-name")
+	if err != nil {
+		return err
+	}
 
 	captureOpts, err := getCaptureOpts(ctx, filter, cmd.Flags())
 	if err != nil {
@@ -77,6 +82,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 			Pod:       captureOpts.K8sPod,
 		},
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
+		NodeName:          nodeName,
 	}
 	return remoteCapture(ctx, captureOpts.Logger, addr, connTimeout, reqTimeout, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
