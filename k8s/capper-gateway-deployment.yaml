@@ -32,11 +32,18 @@ spec:
           - gateway
           - --listen-address
           - 0.0.0.0:48999
-          - --dns-srv-peers
-          - _grpc._tcp.capper-server.default.svc.cluster.local
+          - --serf-listen-address
+          - 0.0.0.0:7946
+          - --serf-peers
+          - capper-peers.default.svc.cluster.local:7946
+          - --peer-server-port
+          - '48999'
         ports:
           - name: grpc
             containerPort: 48999
+            protocol: TCP
+          - name: serf
+            containerPort: 7946
             protocol: TCP
         resources:
           limits:

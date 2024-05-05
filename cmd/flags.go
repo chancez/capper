@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"log/slog"
+	"os"
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/spf13/pflag"
@@ -102,5 +103,42 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 		AlwaysPrint:  alwaysPrint,
 		K8sPod:       k8sPod,
 		K8sNamespace: k8sNs,
+	}, nil
+}
+
+func newSerfFlags() *pflag.FlagSet {
+	fs := pflag.NewFlagSet("serf-flags", pflag.ExitOnError)
+	fs.String("node-name", "", "The node name for this peer. Defaults to the hostname if unspecified.")
+	fs.StringSlice("serf-peers", []string{}, "List of serf peers.")
+	fs.String("serf-listen-address", "127.0.0.1:7946", "Listen address to use for serf.")
+	return fs
+}
+
+type serfOpts struct {
+	NodeName   string
+	Peers      []string
+	ListenAddr string
+}
+
+func getSerfOpts(fs *pflag.FlagSet) (serfOpts, error) {
+	nodeName, err := fs.GetString("node-name")
+	if err != nil {
+		return serfOpts{}, nil
+	}
+	if nodeName == "" {
+		nodeName, _ = os.Hostname()
+	}
+	serfPeers, err := fs.GetStringSlice("serf-peers")
+	if err != nil {
+		return serfOpts{}, nil
+	}
+	serfListen, err := fs.GetString("serf-listen-address")
+	if err != nil {
+		return serfOpts{}, nil
+	}
+	return serfOpts{
+		NodeName:   nodeName,
+		Peers:      serfPeers,
+		ListenAddr: serfListen,
 	}, nil
 }

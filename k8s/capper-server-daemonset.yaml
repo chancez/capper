@@ -18,6 +18,7 @@ spec:
         app: capper
         component: server
     spec:
+      dnsPolicy: ClusterFirstWithHostNet
       tolerations:
       - key: node-role.kubernetes.io/master
         effect: NoSchedule
@@ -29,10 +30,21 @@ spec:
       - name: capper
         image: quay.io/capper/capper:main
         imagePullPolicy: Always
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
         args:
           - server
           - --listen-address
           - 0.0.0.0:48999
+          - --node-name
+          - $(NODE_NAME)
+          - --serf-listen-address
+          - 0.0.0.0:7946
+          - --serf-peers
+          - capper-peers.default.svc.cluster.local:7946
           - --enable-containerd
           - 'true'
         securityContext:
@@ -40,6 +52,9 @@ spec:
         ports:
           - name: grpc
             containerPort: 48999
+            protocol: TCP
+          - name: serf
+            containerPort: 7946
             protocol: TCP
         volumeMounts:
           - name: containerd

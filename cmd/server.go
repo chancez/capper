@@ -18,6 +18,7 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -48,12 +49,17 @@ var serverCmd = &cobra.Command{
 			return err
 		}
 
+		serfOpts, err := getSerfOpts(cmd.Flags())
+		if err != nil {
+			return err
+		}
+
 		log, err := newLevelLogger(logLevel)
 		if err != nil {
 			return err
 		}
 
-		return runServer(cmd.Context(), log, listen, enableContainerd)
+		return runServer(cmd.Context(), log, listen, serfOpts, enableContainerd)
 	},
 }
 
@@ -62,9 +68,10 @@ func init() {
 	serverCmd.Flags().String("listen-address", "127.0.0.1:48999", "Server listen address")
 	serverCmd.Flags().Bool("enable-containerd", false, "Enable containerd/Kubernetes integration")
 	serverCmd.Flags().String("log-level", "info", "Configure the log level.")
+	serverCmd.Flags().AddFlagSet(newSerfFlags())
 }
 
-func runServer(ctx context.Context, logger *slog.Logger, listen string, enableContainerd bool) error {
+func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts serfOpts, enableContainerd bool) error {
 	lis, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
@@ -82,10 +89,18 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, enableCo
 		defer containerdClient.Close()
 	}
 
+	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "server")
+	if err != nil {
+		return fmt.Errorf("error creating serf cluster: %w", err)
+	}
+	defer serf.Leave()
+
 	s := newGRPCServer(logger, &server{
 		clock:            clockwork.NewRealClock(),
 		log:              logger,
 		containerdClient: containerdClient,
+		nodeName:         serfOpts.NodeName,
+		serf:             serf,
 	})
 
 	go func() {
@@ -107,6 +122,8 @@ type server struct {
 	clock            clockwork.Clock
 	log              *slog.Logger
 	containerdClient *containerd.Client
+	nodeName         string
+	serf             *serf.Serf
 }
 
 func (s *server) getNetns(ctx context.Context, req *capperpb.CaptureRequest) (string, error) {
@@ -222,4 +239,34 @@ func newGRPCServer(logger *slog.Logger, capperSrv capperpb.CapperServer) *grpc.S
 	healthpb.RegisterHealthServer(s, health.NewServer())
 	reflection.Register(s)
 	return s
+}
+
+func newSerf(listen string, nodeName string, peers []string, role string) (*serf.Serf, error) {
+	serfAddr, serfPortStr, err := net.SplitHostPort(listen)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse serf addr: %w", err)
+	}
+	serfPort, err := strconv.Atoi(serfPortStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse serf addr: %w", err)
+	}
+
+	serfConf := serf.DefaultConfig()
+	serfConf.NodeName = nodeName
+	serfConf.MemberlistConfig.BindAddr = serfAddr
+	serfConf.MemberlistConfig.BindPort = serfPort
+	serfConf.MemberlistConfig.AdvertisePort = serfPort
+	serfConf.Tags = map[string]string{
+		"role": role,
+	}
+	serf, err := serf.Create(serfConf)
+	if err != nil {
+		return nil, fmt.Errorf("error creating serf cluster: %w", err)
+	}
+
+	_, err = serf.Join(peers, true)
+	if err != nil {
+		return nil, fmt.Errorf("error adding peers to serf: %w", err)
+	}
+	return serf, nil
 }
