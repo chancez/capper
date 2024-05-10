@@ -82,10 +82,10 @@ func (pm *PacketMerger) sendPacket(ctx context.Context) {
 func (pm *PacketMerger) drainHeap(ctx context.Context, timeout time.Duration) int {
 	// flush the entire heap, with a timeout for flushing
 	sent := 0
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	newCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	for len(pm.packetHeap) > 0 {
-		pm.sendPacket(ctx)
+		pm.sendPacket(newCtx)
 		sent++
 	}
 	return sent
