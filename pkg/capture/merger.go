@@ -18,8 +18,10 @@ type PacketSource interface {
 
 // PacketMerger takes multiple PacketSources and combines them
 type PacketMerger struct {
-	clock clockwork.Clock
-	log   *slog.Logger
+	clock  clockwork.Clock
+	log    *slog.Logger
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	// store our packets in a minheap, ordering values by their timestamp.
 	// popping elements will return the packet with the lowest timestamp,
@@ -28,12 +30,13 @@ type PacketMerger struct {
 
 	heapDrainThreshold int
 	flushInterval      time.Duration
-	mergeBufferSize    int
 	outputBufferSize   int
 	exitFlushTimeout   time.Duration
 
-	sources []NamedPacketSource
-	output  chan gopacket.Packet
+	sources     []NamedPacketSource
+	sourcesWg   sync.WaitGroup
+	mergeBuffer chan gopacket.Packet
+	output      chan gopacket.Packet
 }
 
 type NamedPacketSource struct {
@@ -42,15 +45,19 @@ type NamedPacketSource struct {
 }
 
 func NewPacketMerger(log *slog.Logger, sources []NamedPacketSource, heapDrainThreshold int, flushInterval time.Duration, mergeBufferSize int, outputBufferSize int) *PacketMerger {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &PacketMerger{
 		clock:              clockwork.NewRealClock(),
+		ctx:                ctx,
+		cancel:             cancel,
 		log:                log.With("subsystem", "packet-merger"),
 		heapDrainThreshold: heapDrainThreshold,
 		flushInterval:      flushInterval,
-		mergeBufferSize:    mergeBufferSize,
 		outputBufferSize:   outputBufferSize,
 		exitFlushTimeout:   5 * time.Second,
 		sources:            sources,
+		// Use a buffered channel so that we can continue to receive packets from sources while merging
+		mergeBuffer: make(chan gopacket.Packet, mergeBufferSize),
 	}
 }
 
@@ -92,9 +99,6 @@ func (pm *PacketMerger) run(ctx context.Context) {
 		close(pm.output)
 	}()
 
-	// Use a buffered channel so that we can continue to receive packets from sources while merging
-	sourcePackets := make(chan gopacket.Packet, pm.mergeBufferSize)
-
 	// start a consumer goroutine that buffers and merges the packets from each
 	// source before sending them to the output
 	var consumerWg sync.WaitGroup
@@ -116,7 +120,7 @@ func (pm *PacketMerger) run(ctx context.Context) {
 				sent := pm.drainHeap(ctx, pm.exitFlushTimeout)
 				pm.log.Debug("merger consumer cancelled: flushed packets", "num_packets", sent, "flushInterval", pm.flushInterval, "heapSize", len(pm.packetHeap))
 				return
-			case p, ok := <-sourcePackets:
+			case p, ok := <-pm.mergeBuffer:
 				if !ok {
 					// drain the entire heap
 					sent := pm.drainHeap(ctx, pm.exitFlushTimeout)
@@ -151,36 +155,47 @@ func (pm *PacketMerger) run(ctx context.Context) {
 	}()
 
 	pm.log.Debug("starting merger producers")
-	var sourcesWg sync.WaitGroup
 	for _, src := range pm.sources {
 		src := src
-		// start a producer goroutine for each source
-		sourcesWg.Add(1)
-		go func() {
-			pm.log.Debug("merger producer started", "source", src.Name)
-			defer func() {
-				pm.log.Debug("merger producer finished", "source", src.Name)
-				sourcesWg.Done()
-			}()
-
-			// send all the packets coming from this source to the merger/consumer goroutine
-			for packet := range src.PacketsCtx(ctx) {
-				select {
-				case <-ctx.Done():
-					return
-				case sourcePackets <- packet:
-				}
-			}
-		}()
+		pm.AddSource(src)
 	}
-
-	pm.log.Debug("waiting for sources to stop")
-	// After the the input sources are finished, tell the consumer to return by
-	// closing sourcesPackets
-	sourcesWg.Wait()
-	close(sourcePackets)
 
 	pm.log.Debug("waiting for consumer to stop")
 	// wait for the consumer to complete
 	consumerWg.Wait()
+	// consumers are done, stop the sources and stop the merger merger
+	pm.stop()
+}
+
+func (pm *PacketMerger) stop() {
+	pm.log.Debug("stopping merger")
+	pm.cancel()
+	pm.log.Debug("waiting for sources to stop")
+	// Wait for the sources
+	pm.sourcesWg.Wait()
+	// After the the input sources are finished, tell the consumer to return by
+	// closing mergeBuffer
+	close(pm.mergeBuffer)
+	pm.log.Debug("merger stopped")
+}
+
+func (pm *PacketMerger) AddSource(src NamedPacketSource) {
+	// start a producer goroutine for each source
+	pm.sourcesWg.Add(1)
+	go func() {
+		pm.log.Debug("merger producer started", "source", src.Name)
+		defer func() {
+			pm.log.Debug("merger producer finished", "source", src.Name)
+			pm.sourcesWg.Done()
+		}()
+
+		// send all the packets coming from this source to the merger/consumer goroutine
+		for packet := range src.PacketsCtx(pm.ctx) {
+			select {
+			case <-pm.ctx.Done():
+				return
+			case pm.mergeBuffer <- packet:
+			}
+		}
+	}()
 }
