@@ -38,7 +38,6 @@ func init() {
 	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
 	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
 	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
-	remoteCaptureCmd.Flags().String("node-name", "", "Run the capture on a specific node")
 	captureFlags := newCaptureFlags()
 	remoteCaptureCmd.Flags().AddFlagSet(captureFlags)
 }
@@ -63,10 +62,6 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	nodeName, err := cmd.Flags().GetString("node-name")
-	if err != nil {
-		return err
-	}
 
 	captureOpts, err := getCaptureOpts(ctx, filter, cmd.Flags())
 	if err != nil {
@@ -84,7 +79,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 			Pod:       captureOpts.K8sPod,
 		},
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
-		NodeName:          nodeName,
+		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
 	}
 	return remoteCapture(ctx, captureOpts.Logger, addr, connTimeout, reqTimeout, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
@@ -154,6 +149,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		mergeBufferSize := 100
 		merger = capture.NewPacketMerger(log, nil, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
 
+		// This goroutine prints and writes packets after retrieving them from the merger
 		eg.Go(func() error {
 			var handlers []capture.PacketHandler
 			if printPackets {
@@ -201,6 +197,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		})
 	}
 
+	// This goroutine reads from the gRPC stream
 	eg.Go(func() error {
 		configuredLinkType := false
 		writers := make(map[string]io.Writer)

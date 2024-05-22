@@ -144,9 +144,9 @@ func (s *server) getPodNetns(ctx context.Context, pod, namespace string) (string
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
-	if req.GetNodeName() != "" && req.GetNodeName() != s.nodeName {
-		return status.Errorf(codes.InvalidArgument, "invalid node_name filter %s, node=%s", req.GetNodeName(), s.nodeName)
-	}
+	// if req.GetNodeName() != "" && req.GetNodeName() != s.nodeName {
+	// 	return status.Errorf(codes.InvalidArgument, "invalid node_name filter %s, node=%s", req.GetNodeName(), s.nodeName)
+	// }
 
 	var netns string
 	pod := req.GetK8SPodFilter().GetPod()

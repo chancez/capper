@@ -17,7 +17,7 @@ proto:
 		--go_out=. \
 		--go-grpc_opt=paths=source_relative \
 		--go-grpc_out=. \
-		proto/capper/capper.proto
+		proto/capper/*.proto
 
 image:
 	docker build $(DOCKER_FLAGS) -t quay.io/capper/capper:$(IMAGE_TAG) .

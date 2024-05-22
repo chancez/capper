@@ -11,6 +11,7 @@ import (
 	"time"
 
 	capperpb "github.com/chancez/capper/proto/capper"
+	"github.com/gogo/protobuf/proto"
 	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
@@ -105,6 +106,7 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, serfOpt
 
 type gateway struct {
 	capperpb.UnimplementedCapperServer
+	capperpb.UnimplementedQuerierServer
 	clock          clockwork.Clock
 	log            *slog.Logger
 	clientPool     *PeerClientConnPool
@@ -120,24 +122,95 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 	}
 	s.log.Debug("found peers", "peers", peers)
 
-	if nodeName := req.GetNodeName(); nodeName != "" {
-		for _, peer := range peers {
-			if peer.Name == nodeName {
-				if peer.Status != serf.StatusAlive {
-					s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
-					return status.Errorf(codes.Unavailable, "node %s status is %s", nodeName, peer.Status)
-				}
-				return s.captureNode(stream.Context(), peer, req, stream)
-			}
-		}
-		return status.Errorf(codes.NotFound, "unable to find peer for node %s", nodeName)
-	}
-
-	return s.captureMultiNodes(peers, req, stream)
-
+	handler := captureResponseHandlerFunc(stream.Send)
+	return s.captureMultiNodes(stream.Context(), peers, req, handler)
 }
 
-func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
+func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperpb.Querier_CaptureQueryServer) error {
+	ctx := stream.Context()
+	peers := g.getPeers()
+	var nodes []serf.Member
+	var pods []*capperpb.K8SPodFilter
+	for _, target := range req.GetTargets() {
+		switch targetVal := target.GetTarget().(type) {
+		case *capperpb.CaptureQueryTarget_Node:
+			nodeName := targetVal.Node
+			for _, peer := range peers {
+				if peer.Name == nodeName {
+					if peer.Status != serf.StatusAlive {
+						g.log.Warn("skipping peer, status is not alive", "status", peer.Status)
+						return status.Errorf(codes.Unavailable, "node %s status is %s", nodeName, peer.Status)
+					}
+					nodes = append(nodes, peer)
+				}
+			}
+		case *capperpb.CaptureQueryTarget_Pod:
+			pods = append(pods, target.GetPod())
+		}
+	}
+
+	eg, ctx := errgroup.WithContext(ctx)
+	// Make a request for each node to be queried
+	for _, node := range nodes {
+		peer := node
+		eg.Go(func() error {
+			return g.captureQueryNode(ctx, peer, req.GetCaptureRequest(), stream)
+		})
+	}
+	// Make a request to each node, for each pod to be queried.
+	// TODO: Optimize this to only query nodes with the correct pods (using serf to gossip the pods on each node?)
+	for _, pod := range pods {
+		for _, peer := range peers {
+			pod := pod
+			peer := peer
+			eg.Go(func() error {
+				captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
+				// Override the pod filter to the one specified in the target
+				captureReq.K8SPodFilter = pod
+				err := g.captureQueryNode(ctx, peer, captureReq, stream)
+				// Ignore not found since we're querying every node, and we know the
+				// pod is only going to be running on one of these nodes.
+				if status.Code(err) == codes.NotFound {
+					return nil
+				}
+				return err
+			})
+		}
+	}
+
+	if err := eg.Wait(); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Querier_CaptureQueryServer) error {
+	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
+		return stream.Send(&capperpb.CaptureQueryResponse{
+			Data:       resp.GetData(),
+			Identifier: resp.GetIdentifier(),
+			LinkType:   resp.GetLinkType(),
+			NodeName:   peer.Name,
+		})
+	})
+	return g.captureNode(ctx, peer, req, handler)
+}
+
+type captureResponseHandler interface {
+	HandleResponse(*capperpb.CaptureResponse) error
+}
+
+type captureResponseHandlerFunc func(*capperpb.CaptureResponse) error
+
+func (f captureResponseHandlerFunc) HandleResponse(resp *capperpb.CaptureResponse) error {
+	return f(resp)
+}
+
+func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler) error {
 	conn, err := s.getClient(ctx, peer)
 	if err != nil {
 		return err
@@ -166,7 +239,7 @@ func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capper
 		if err != nil {
 			return fmt.Errorf("error receiving from peer stream: %w", err)
 		}
-		err = stream.Send(resp)
+		err = handler.HandleResponse(resp)
 		if status.Code(err) == codes.Canceled {
 			return nil
 		}
@@ -176,8 +249,8 @@ func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capper
 	}
 }
 
-func (s *gateway) captureMultiNodes(peers []serf.Member, req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
-	eg, ctx := errgroup.WithContext(stream.Context())
+func (s *gateway) captureMultiNodes(ctx context.Context, peers []serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler) error {
+	eg, ctx := errgroup.WithContext(ctx)
 	for _, peer := range peers {
 		peer := peer
 		if peer.Status != serf.StatusAlive {
@@ -185,7 +258,7 @@ func (s *gateway) captureMultiNodes(peers []serf.Member, req *capperpb.CaptureRe
 			continue
 		}
 		eg.Go(func() error {
-			return s.captureNode(ctx, peer, req, stream)
+			return s.captureNode(ctx, peer, req, handler)
 		})
 	}
 	err := eg.Wait()
