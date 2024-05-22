@@ -130,7 +130,7 @@ func (s *gateway) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_C
 				return s.captureNode(stream.Context(), peer, req, stream)
 			}
 		}
-		return status.Errorf(codes.InvalidArgument, "unable to find peer for node %s", nodeName)
+		return status.Errorf(codes.NotFound, "unable to find peer for node %s", nodeName)
 	}
 
 	return s.captureMultiNodes(peers, req, stream)
