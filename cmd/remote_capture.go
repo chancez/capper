@@ -85,6 +85,11 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 }
 
 func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
+	executor := &capperCaptureExecutor{req: req}
+	return executeRemoteCapture(ctx, log, addr, connTimeout, reqTimeout, executor, uint32(req.GetSnaplen()), outputFile, alwaysPrint)
+}
+
+func executeRemoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, executor remoteCaptureExecutor, snaplen uint32, outputFile string, alwaysPrint bool) error {
 	var outputDir string
 	if outputFile != "" {
 		fi, err := os.Stat(outputFile)
@@ -102,6 +107,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	mergePackets := printPackets || singleFileOutput
 
 	clock := clockwork.NewRealClock()
+
 	log.Debug("connecting to server", "server", addr)
 	connCtx := ctx
 	connCancel := func() {}
@@ -127,14 +133,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 	packetsTotal := 0
 
 	log.Debug("creating capture stream")
-	stream, err := c.Capture(reqCtx, req)
+	iter, err := executor.Capture(reqCtx, c)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	log.Info("capture started", "interface", req.GetInterface(), "snaplen", req.GetSnaplen(), "promisc", !req.GetNoPromiscuousMode(), "num_packets", req.GetNumPackets(), "duration", req.GetDuration())
+	log.Info("capture started")
 	defer func() {
-		log.Info("capture finished", "interface", req.GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
+		log.Info("capture finished", "packets", packetsTotal, "capture_duration", clock.Since(start))
 	}()
 
 	linkTypeCh := make(chan layers.LinkType)
@@ -181,7 +187,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 					}
 				}
 
-				writeHandler, err := capture.NewPcapWriterHandler(writer, linkType, uint32(req.GetSnaplen()))
+				writeHandler, err := capture.NewPcapWriterHandler(writer, linkType, snaplen)
 				if err != nil {
 					return err
 				}
@@ -203,7 +209,8 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		writers := make(map[string]io.Writer)
 		for {
 			// Read packets from the gRPC stream and send them to the reader via the pipeWriter
-			resp, err := stream.Recv()
+			// stream type is unique
+			resp, err := iter.Next()
 			if status.Code(err) == codes.Canceled {
 				return nil
 			}
@@ -341,4 +348,40 @@ func (r *LazyPcapReader) LinkType() layers.LinkType {
 func (r *LazyPcapReader) Snaplen() uint32 {
 	r.once.Do(r.init)
 	return r.pcapReader.Snaplen()
+}
+
+type remoteResponse interface {
+	GetData() []byte
+	GetIdentifier() string
+	GetLinkType() int64
+}
+
+type remoteCaptureIterator interface {
+	Next() (remoteResponse, error)
+}
+
+type remoteCaptureExecutor interface {
+	Capture(context.Context, capperpb.CapperClient) (remoteCaptureIterator, error)
+}
+
+type capperCaptureExecutor struct {
+	req *capperpb.CaptureRequest
+}
+
+func (e *capperCaptureExecutor) Capture(ctx context.Context, client capperpb.CapperClient) (remoteCaptureIterator, error) {
+	stream, err := client.Capture(ctx, e.req)
+	if err != nil {
+		return nil, err
+	}
+	return captureClientIterator{
+		stream: stream,
+	}, nil
+}
+
+type captureClientIterator struct {
+	stream capperpb.Capper_CaptureClient
+}
+
+func (i captureClientIterator) Next() (remoteResponse, error) {
+	return i.stream.Recv()
 }
