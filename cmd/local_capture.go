@@ -228,11 +228,25 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 }
 
 func normalizeFilename(host string, netns string, ifaces []string) string {
-	ifaceStr := strings.Join(ifaces, ",")
-	if runtime.GOOS != "linux" {
-		return fmt.Sprintf("host:%s:ifaces:%s.pcap", host, ifaceStr)
-
+	var b strings.Builder
+	b.WriteString("host:")
+	b.WriteString(host)
+	if runtime.GOOS == "linux" {
+		if netns != "" {
+			b.WriteString(":netns:")
+			netnsStr := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-")
+			b.WriteString(netnsStr)
+		}
 	}
-	netnsStr := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-")
-	return fmt.Sprintf("host:%s:netns:%s:ifaces:%s.pcap", host, netnsStr, ifaceStr)
+	if len(ifaces) != 0 {
+		b.WriteString(":ifaces:")
+		for i, iface := range ifaces {
+			b.WriteString(iface)
+			if i != len(ifaces)-1 {
+				b.WriteString(",")
+			}
+		}
+	}
+	b.WriteString(".pcap")
+	return b.String()
 }
