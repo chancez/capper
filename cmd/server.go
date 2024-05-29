@@ -10,17 +10,21 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/chancez/capper/pkg/capture"
 	containerdutil "github.com/chancez/capper/pkg/containerd"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/namespaces"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
@@ -28,6 +32,8 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
+
+const nodeMetadataUpdateInterval = 5 * time.Second
 
 // serverCmd represents the server command
 var serverCmd = &cobra.Command{
@@ -100,13 +106,34 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts
 		clock:            clockwork.NewRealClock(),
 		log:              logger,
 		containerdClient: containerdClient,
-		nodeName:         serfOpts.NodeName,
 		serf:             serf,
+		metadata: nodeMetadata{
+			nodeName: serfOpts.NodeName,
+			pods:     make(map[string]*capperpb.Pod),
+		},
+		metadataSubscribers: make(map[chan *capperpb.NodeMetadataUpdate]struct{}),
 	}
 
 	capperpb.RegisterCapperServer(srv, capperServer)
 	healthpb.RegisterHealthServer(srv, health.NewServer())
 	reflection.Register(srv)
+
+	go func() {
+		t := time.NewTicker(nodeMetadataUpdateInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Info("got signal, stopping node metadata updates")
+				return
+			case <-t.C:
+				err := capperServer.updateNodeMetadata(ctx)
+				if err != nil {
+					logger.Error("error updating node metadata", "error", err)
+				}
+			}
+		}
+	}()
 
 	go func() {
 		<-ctx.Done()
@@ -127,8 +154,101 @@ type server struct {
 	clock            clockwork.Clock
 	log              *slog.Logger
 	containerdClient *containerd.Client
-	nodeName         string
 	serf             *serf.Serf
+
+	metadataMu          sync.Mutex
+	metadata            nodeMetadata
+	metadataSubscribers map[chan *capperpb.NodeMetadataUpdate]struct{}
+}
+
+type nodeMetadata struct {
+	nodeName string
+	pods     map[string]*capperpb.Pod
+}
+
+func (s *server) updateNodeMetadata(ctx context.Context) error {
+	if s.containerdClient != nil {
+		ctrCtx := namespaces.WithNamespace(ctx, "k8s.io")
+		containers, err := s.containerdClient.Containers(ctrCtx)
+		if err != nil {
+			return err
+		}
+		newPods := make(map[string]*capperpb.Pod)
+		for _, ctr := range containers {
+			spec, err := ctr.Spec(ctrCtx)
+			if err != nil {
+				return err
+			}
+			pod := &capperpb.Pod{}
+			// set the pod namespace/name
+			for key, value := range spec.Annotations {
+				switch key {
+				case "io.kubernetes.cri.sandbox-name":
+					pod.Name = value
+				case "io.kubernetes.cri.sandbox-namespace":
+					pod.Namespace = value
+				}
+			}
+			if pod.GetNamespace() != "" && pod.GetName() != "" {
+				newPods[pod.GetNamespace()+"/"+pod.GetName()] = pod
+			}
+		}
+
+		// diff the new and the old
+		added := make([]*capperpb.Pod, 0)
+		for key, pod := range newPods {
+			if _, ok := s.metadata.pods[key]; !ok {
+				added = append(added, pod)
+			}
+		}
+
+		removed := make([]*capperpb.Pod, 0)
+		for key, pod := range s.metadata.pods {
+			if _, ok := newPods[key]; !ok {
+				removed = append(removed, pod)
+			}
+		}
+
+		if len(added) == 0 && len(removed) == 0 {
+			s.log.Debug("no updates for local pod metadata")
+			return nil
+		}
+
+		s.metadataMu.Lock()
+		defer s.metadataMu.Unlock()
+
+		s.log.Debug("updating local pod metadata", "added", added, "removed", removed)
+		defer s.log.Debug("finished updating local pod metadata")
+
+		s.metadata.pods = newPods
+
+		update := &capperpb.NodeMetadataUpdate{
+			NodeName: s.metadata.nodeName,
+			PodUpdates: &capperpb.PodMetadataUpdate{
+				AddedPods: added, RemovedPods: removed,
+			},
+		}
+		// send node metadata update delta to any listening subscribers
+		var eg errgroup.Group
+		for ch := range s.metadataSubscribers {
+			ch := ch
+			// Send each update in a separate Go routine since some subscribers might
+			// be slow to process the update
+			eg.Go(func() error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case ch <- update:
+					return nil
+				}
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return fmt.Errorf("error waiting for node metadata updates to be processed by remote subscribers: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (s *server) getPodNetns(ctx context.Context, pod, namespace string) (string, error) {
@@ -169,6 +289,61 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 	}
 
 	return s.capture(ctx, req.GetInterface(), netns, conf, stream)
+}
+
+func (s *server) NodeMetadata(req *capperpb.NodeMetadataRequest, stream capperpb.Capper_NodeMetadataServer) error {
+	ctx := stream.Context()
+
+	// Create a new channel for this subscriber and store it in the metadataSubscribers map
+	s.metadataMu.Lock()
+	initialPods := make([]*capperpb.Pod, 0, len(s.metadata.pods))
+	for _, pod := range s.metadata.pods {
+		initialPods = append(initialPods, pod)
+	}
+	updatesCh := make(chan *capperpb.NodeMetadataUpdate)
+	s.metadataSubscribers[updatesCh] = struct{}{}
+	s.metadataMu.Unlock()
+
+	// Remove the updates channel from the map of subscribers when the RPC ends
+	defer func() {
+		s.metadataMu.Lock()
+		delete(s.metadataSubscribers, updatesCh)
+		s.metadataMu.Unlock()
+	}()
+
+	// Send the subscriber the list of initial pods this server has
+	if err := stream.Send(&capperpb.NodeMetadataResponse{
+		Updates: &capperpb.NodeMetadataUpdate{
+			NodeName: s.metadata.nodeName,
+			PodUpdates: &capperpb.PodMetadataUpdate{
+				AddedPods: initialPods,
+			},
+		},
+	}); err != nil {
+		errCode := status.Code(err)
+		if errCode == codes.Canceled || errCode == codes.Unavailable {
+			return nil
+		}
+		return fmt.Errorf("error sending metadata update: %w", err)
+	}
+
+	// Wait for updates to the node metadata or for the stream to be cancelled.
+	for {
+		select {
+		case update := <-updatesCh:
+			if err := stream.Send(&capperpb.NodeMetadataResponse{
+				Updates: update,
+			}); err != nil {
+				errCode := status.Code(err)
+				if errCode == codes.Canceled || errCode == codes.Unavailable {
+					return nil
+				}
+				return fmt.Errorf("error sending metadata update: %w", err)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (s *server) capture(ctx context.Context, ifaces []string, netns string, conf capture.Config, stream capperpb.Capper_CaptureServer) error {

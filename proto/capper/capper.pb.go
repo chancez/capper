@@ -250,6 +250,256 @@ func (x *CaptureResponse) GetNetns() string {
 	return ""
 }
 
+type NodeMetadataRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *NodeMetadataRequest) Reset() {
+	*x = NodeMetadataRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_capper_capper_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *NodeMetadataRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeMetadataRequest) ProtoMessage() {}
+
+func (x *NodeMetadataRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_capper_capper_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeMetadataRequest.ProtoReflect.Descriptor instead.
+func (*NodeMetadataRequest) Descriptor() ([]byte, []int) {
+	return file_proto_capper_capper_proto_rawDescGZIP(), []int{3}
+}
+
+type NodeMetadataResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Updates *NodeMetadataUpdate `protobuf:"bytes,1,opt,name=updates,proto3" json:"updates,omitempty"`
+}
+
+func (x *NodeMetadataResponse) Reset() {
+	*x = NodeMetadataResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_capper_capper_proto_msgTypes[4]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *NodeMetadataResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeMetadataResponse) ProtoMessage() {}
+
+func (x *NodeMetadataResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_capper_capper_proto_msgTypes[4]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeMetadataResponse.ProtoReflect.Descriptor instead.
+func (*NodeMetadataResponse) Descriptor() ([]byte, []int) {
+	return file_proto_capper_capper_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *NodeMetadataResponse) GetUpdates() *NodeMetadataUpdate {
+	if x != nil {
+		return x.Updates
+	}
+	return nil
+}
+
+type NodeMetadataUpdate struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	NodeName   string             `protobuf:"bytes,1,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	PodUpdates *PodMetadataUpdate `protobuf:"bytes,2,opt,name=pod_updates,json=podUpdates,proto3" json:"pod_updates,omitempty"`
+}
+
+func (x *NodeMetadataUpdate) Reset() {
+	*x = NodeMetadataUpdate{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_capper_capper_proto_msgTypes[5]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *NodeMetadataUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NodeMetadataUpdate) ProtoMessage() {}
+
+func (x *NodeMetadataUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_capper_capper_proto_msgTypes[5]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NodeMetadataUpdate.ProtoReflect.Descriptor instead.
+func (*NodeMetadataUpdate) Descriptor() ([]byte, []int) {
+	return file_proto_capper_capper_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NodeMetadataUpdate) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *NodeMetadataUpdate) GetPodUpdates() *PodMetadataUpdate {
+	if x != nil {
+		return x.PodUpdates
+	}
+	return nil
+}
+
+type PodMetadataUpdate struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	AddedPods   []*Pod `protobuf:"bytes,1,rep,name=added_pods,json=addedPods,proto3" json:"added_pods,omitempty"`
+	RemovedPods []*Pod `protobuf:"bytes,2,rep,name=removed_pods,json=removedPods,proto3" json:"removed_pods,omitempty"`
+}
+
+func (x *PodMetadataUpdate) Reset() {
+	*x = PodMetadataUpdate{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_capper_capper_proto_msgTypes[6]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PodMetadataUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PodMetadataUpdate) ProtoMessage() {}
+
+func (x *PodMetadataUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_capper_capper_proto_msgTypes[6]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PodMetadataUpdate.ProtoReflect.Descriptor instead.
+func (*PodMetadataUpdate) Descriptor() ([]byte, []int) {
+	return file_proto_capper_capper_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PodMetadataUpdate) GetAddedPods() []*Pod {
+	if x != nil {
+		return x.AddedPods
+	}
+	return nil
+}
+
+func (x *PodMetadataUpdate) GetRemovedPods() []*Pod {
+	if x != nil {
+		return x.RemovedPods
+	}
+	return nil
+}
+
+type Pod struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Name      string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+}
+
+func (x *Pod) Reset() {
+	*x = Pod{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_proto_capper_capper_proto_msgTypes[7]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *Pod) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Pod) ProtoMessage() {}
+
+func (x *Pod) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_capper_capper_proto_msgTypes[7]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Pod.ProtoReflect.Descriptor instead.
+func (*Pod) Descriptor() ([]byte, []int) {
+	return file_proto_capper_capper_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *Pod) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *Pod) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 var File_proto_capper_capper_proto protoreflect.FileDescriptor
 
 var file_proto_capper_capper_proto_rawDesc = []byte{
@@ -289,14 +539,43 @@ var file_proto_capper_capper_proto_rawDesc = []byte{
 	0x1c, 0x0a, 0x09, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x66, 0x61, 0x63, 0x65, 0x18, 0x03, 0x20, 0x03,
 	0x28, 0x09, 0x52, 0x09, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x66, 0x61, 0x63, 0x65, 0x12, 0x14, 0x0a,
 	0x05, 0x6e, 0x65, 0x74, 0x6e, 0x73, 0x18, 0x04, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x6e, 0x65,
-	0x74, 0x6e, 0x73, 0x32, 0x48, 0x0a, 0x06, 0x43, 0x61, 0x70, 0x70, 0x65, 0x72, 0x12, 0x3e, 0x0a,
-	0x07, 0x43, 0x61, 0x70, 0x74, 0x75, 0x72, 0x65, 0x12, 0x16, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65,
-	0x72, 0x2e, 0x43, 0x61, 0x70, 0x74, 0x75, 0x72, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
-	0x1a, 0x17, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x43, 0x61, 0x70, 0x74, 0x75, 0x72,
-	0x65, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x42, 0x28, 0x5a,
-	0x26, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x63, 0x68, 0x61, 0x6e,
-	0x63, 0x65, 0x7a, 0x2f, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f,
-	0x2f, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x74, 0x6e, 0x73, 0x22, 0x15, 0x0a, 0x13, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x65, 0x74, 0x61, 0x64,
+	0x61, 0x74, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x4c, 0x0a, 0x14, 0x4e, 0x6f,
+	0x64, 0x65, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x12, 0x34, 0x0a, 0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x18, 0x01, 0x20,
+	0x01, 0x28, 0x0b, 0x32, 0x1a, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x4e, 0x6f, 0x64,
+	0x65, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x52,
+	0x07, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x22, 0x6d, 0x0a, 0x12, 0x4e, 0x6f, 0x64, 0x65,
+	0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x12, 0x1b,
+	0x0a, 0x09, 0x6e, 0x6f, 0x64, 0x65, 0x5f, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28,
+	0x09, 0x52, 0x08, 0x6e, 0x6f, 0x64, 0x65, 0x4e, 0x61, 0x6d, 0x65, 0x12, 0x3a, 0x0a, 0x0b, 0x70,
+	0x6f, 0x64, 0x5f, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b,
+	0x32, 0x19, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x50, 0x6f, 0x64, 0x4d, 0x65, 0x74,
+	0x61, 0x64, 0x61, 0x74, 0x61, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x52, 0x0a, 0x70, 0x6f, 0x64,
+	0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x73, 0x22, 0x6f, 0x0a, 0x11, 0x50, 0x6f, 0x64, 0x4d, 0x65,
+	0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x55, 0x70, 0x64, 0x61, 0x74, 0x65, 0x12, 0x2a, 0x0a, 0x0a,
+	0x61, 0x64, 0x64, 0x65, 0x64, 0x5f, 0x70, 0x6f, 0x64, 0x73, 0x18, 0x01, 0x20, 0x03, 0x28, 0x0b,
+	0x32, 0x0b, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x50, 0x6f, 0x64, 0x52, 0x09, 0x61,
+	0x64, 0x64, 0x65, 0x64, 0x50, 0x6f, 0x64, 0x73, 0x12, 0x2e, 0x0a, 0x0c, 0x72, 0x65, 0x6d, 0x6f,
+	0x76, 0x65, 0x64, 0x5f, 0x70, 0x6f, 0x64, 0x73, 0x18, 0x02, 0x20, 0x03, 0x28, 0x0b, 0x32, 0x0b,
+	0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x50, 0x6f, 0x64, 0x52, 0x0b, 0x72, 0x65, 0x6d,
+	0x6f, 0x76, 0x65, 0x64, 0x50, 0x6f, 0x64, 0x73, 0x22, 0x37, 0x0a, 0x03, 0x50, 0x6f, 0x64, 0x12,
+	0x1c, 0x0a, 0x09, 0x6e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x18, 0x01, 0x20, 0x01,
+	0x28, 0x09, 0x52, 0x09, 0x6e, 0x61, 0x6d, 0x65, 0x73, 0x70, 0x61, 0x63, 0x65, 0x12, 0x12, 0x0a,
+	0x04, 0x6e, 0x61, 0x6d, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x6e, 0x61, 0x6d,
+	0x65, 0x32, 0x97, 0x01, 0x0a, 0x06, 0x43, 0x61, 0x70, 0x70, 0x65, 0x72, 0x12, 0x3e, 0x0a, 0x07,
+	0x43, 0x61, 0x70, 0x74, 0x75, 0x72, 0x65, 0x12, 0x16, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72,
+	0x2e, 0x43, 0x61, 0x70, 0x74, 0x75, 0x72, 0x65, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
+	0x17, 0x2e, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x43, 0x61, 0x70, 0x74, 0x75, 0x72, 0x65,
+	0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x12, 0x4d, 0x0a, 0x0c,
+	0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x12, 0x1b, 0x2e, 0x63,
+	0x61, 0x70, 0x70, 0x65, 0x72, 0x2e, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61,
+	0x74, 0x61, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x1c, 0x2e, 0x63, 0x61, 0x70, 0x70,
+	0x65, 0x72, 0x2e, 0x4e, 0x6f, 0x64, 0x65, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x52,
+	0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x00, 0x30, 0x01, 0x42, 0x28, 0x5a, 0x26, 0x67,
+	0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x63, 0x68, 0x61, 0x6e, 0x63, 0x65,
+	0x7a, 0x2f, 0x63, 0x61, 0x70, 0x70, 0x65, 0x72, 0x2f, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x2f, 0x63,
+	0x61, 0x70, 0x70, 0x65, 0x72, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -311,23 +590,34 @@ func file_proto_capper_capper_proto_rawDescGZIP() []byte {
 	return file_proto_capper_capper_proto_rawDescData
 }
 
-var file_proto_capper_capper_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_proto_capper_capper_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_proto_capper_capper_proto_goTypes = []interface{}{
-	(*CaptureRequest)(nil),      // 0: capper.CaptureRequest
-	(*K8SPodFilter)(nil),        // 1: capper.K8sPodFilter
-	(*CaptureResponse)(nil),     // 2: capper.CaptureResponse
-	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
+	(*CaptureRequest)(nil),       // 0: capper.CaptureRequest
+	(*K8SPodFilter)(nil),         // 1: capper.K8sPodFilter
+	(*CaptureResponse)(nil),      // 2: capper.CaptureResponse
+	(*NodeMetadataRequest)(nil),  // 3: capper.NodeMetadataRequest
+	(*NodeMetadataResponse)(nil), // 4: capper.NodeMetadataResponse
+	(*NodeMetadataUpdate)(nil),   // 5: capper.NodeMetadataUpdate
+	(*PodMetadataUpdate)(nil),    // 6: capper.PodMetadataUpdate
+	(*Pod)(nil),                  // 7: capper.Pod
+	(*durationpb.Duration)(nil),  // 8: google.protobuf.Duration
 }
 var file_proto_capper_capper_proto_depIdxs = []int32{
-	3, // 0: capper.CaptureRequest.duration:type_name -> google.protobuf.Duration
+	8, // 0: capper.CaptureRequest.duration:type_name -> google.protobuf.Duration
 	1, // 1: capper.CaptureRequest.k8s_pod_filter:type_name -> capper.K8sPodFilter
-	0, // 2: capper.Capper.Capture:input_type -> capper.CaptureRequest
-	2, // 3: capper.Capper.Capture:output_type -> capper.CaptureResponse
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	5, // 2: capper.NodeMetadataResponse.updates:type_name -> capper.NodeMetadataUpdate
+	6, // 3: capper.NodeMetadataUpdate.pod_updates:type_name -> capper.PodMetadataUpdate
+	7, // 4: capper.PodMetadataUpdate.added_pods:type_name -> capper.Pod
+	7, // 5: capper.PodMetadataUpdate.removed_pods:type_name -> capper.Pod
+	0, // 6: capper.Capper.Capture:input_type -> capper.CaptureRequest
+	3, // 7: capper.Capper.NodeMetadata:input_type -> capper.NodeMetadataRequest
+	2, // 8: capper.Capper.Capture:output_type -> capper.CaptureResponse
+	4, // 9: capper.Capper.NodeMetadata:output_type -> capper.NodeMetadataResponse
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_proto_capper_capper_proto_init() }
@@ -372,6 +662,66 @@ func file_proto_capper_capper_proto_init() {
 				return nil
 			}
 		}
+		file_proto_capper_capper_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*NodeMetadataRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_capper_capper_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*NodeMetadataResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_capper_capper_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*NodeMetadataUpdate); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_capper_capper_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*PodMetadataUpdate); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_proto_capper_capper_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*Pod); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -379,7 +729,7 @@ func file_proto_capper_capper_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_proto_capper_capper_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

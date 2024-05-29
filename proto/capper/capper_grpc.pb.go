@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CapperClient interface {
 	Capture(ctx context.Context, in *CaptureRequest, opts ...grpc.CallOption) (Capper_CaptureClient, error)
+	NodeMetadata(ctx context.Context, in *NodeMetadataRequest, opts ...grpc.CallOption) (Capper_NodeMetadataClient, error)
 }
 
 type capperClient struct {
@@ -65,11 +66,44 @@ func (x *capperCaptureClient) Recv() (*CaptureResponse, error) {
 	return m, nil
 }
 
+func (c *capperClient) NodeMetadata(ctx context.Context, in *NodeMetadataRequest, opts ...grpc.CallOption) (Capper_NodeMetadataClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Capper_ServiceDesc.Streams[1], "/capper.Capper/NodeMetadata", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &capperNodeMetadataClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type Capper_NodeMetadataClient interface {
+	Recv() (*NodeMetadataResponse, error)
+	grpc.ClientStream
+}
+
+type capperNodeMetadataClient struct {
+	grpc.ClientStream
+}
+
+func (x *capperNodeMetadataClient) Recv() (*NodeMetadataResponse, error) {
+	m := new(NodeMetadataResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // CapperServer is the server API for Capper service.
 // All implementations must embed UnimplementedCapperServer
 // for forward compatibility
 type CapperServer interface {
 	Capture(*CaptureRequest, Capper_CaptureServer) error
+	NodeMetadata(*NodeMetadataRequest, Capper_NodeMetadataServer) error
 	mustEmbedUnimplementedCapperServer()
 }
 
@@ -79,6 +113,9 @@ type UnimplementedCapperServer struct {
 
 func (UnimplementedCapperServer) Capture(*CaptureRequest, Capper_CaptureServer) error {
 	return status.Errorf(codes.Unimplemented, "method Capture not implemented")
+}
+func (UnimplementedCapperServer) NodeMetadata(*NodeMetadataRequest, Capper_NodeMetadataServer) error {
+	return status.Errorf(codes.Unimplemented, "method NodeMetadata not implemented")
 }
 func (UnimplementedCapperServer) mustEmbedUnimplementedCapperServer() {}
 
@@ -114,6 +151,27 @@ func (x *capperCaptureServer) Send(m *CaptureResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Capper_NodeMetadata_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(NodeMetadataRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(CapperServer).NodeMetadata(m, &capperNodeMetadataServer{stream})
+}
+
+type Capper_NodeMetadataServer interface {
+	Send(*NodeMetadataResponse) error
+	grpc.ServerStream
+}
+
+type capperNodeMetadataServer struct {
+	grpc.ServerStream
+}
+
+func (x *capperNodeMetadataServer) Send(m *NodeMetadataResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // Capper_ServiceDesc is the grpc.ServiceDesc for Capper service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -125,6 +183,11 @@ var Capper_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Capture",
 			Handler:       _Capper_Capture_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "NodeMetadata",
+			Handler:       _Capper_NodeMetadata_Handler,
 			ServerStreams: true,
 		},
 	},

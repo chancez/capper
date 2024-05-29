@@ -8,6 +8,7 @@ option go_package = "github.com/chancez/capper/proto/capper";
 
 service Capper {
   rpc Capture(CaptureRequest) returns (stream CaptureResponse) {}
+  rpc NodeMetadata(NodeMetadataRequest) returns (stream NodeMetadataResponse) {}
 }
 
 message CaptureRequest {
@@ -31,4 +32,26 @@ message CaptureResponse {
   int64 link_type = 2;
   repeated string interface = 3;
   string netns = 4;
+}
+
+message NodeMetadataRequest {
+}
+
+message NodeMetadataResponse {
+  NodeMetadataUpdate updates = 1;
+}
+
+message NodeMetadataUpdate {
+  string node_name = 1;
+  PodMetadataUpdate pod_updates = 2;
+}
+
+message PodMetadataUpdate {
+  repeated Pod added_pods = 1;
+  repeated Pod removed_pods = 2;
+}
+
+message Pod {
+  string namespace = 1;
+  string name = 2;
 }
