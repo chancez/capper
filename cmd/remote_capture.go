@@ -7,9 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
@@ -18,6 +16,7 @@ import (
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -35,12 +34,13 @@ var remoteCaptureCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(remoteCaptureCmd)
-	remoteCaptureCmd.Flags().StringP("server", "a", "127.0.0.1:48999", "Remote capper server address to connect to")
-	remoteCaptureCmd.Flags().Duration("request-timeout", 0, "Request timeout")
-	remoteCaptureCmd.Flags().Duration("connection-timeout", 10*time.Second, "Connection timeout")
-	remoteCaptureCmd.Flags().String("node-name", "", "Run the capture on a specific node")
-	captureFlags := newCaptureFlags()
-	remoteCaptureCmd.Flags().AddFlagSet(captureFlags)
+
+	for _, fs := range []*pflag.FlagSet{
+		newCaptureFlags(),
+		newRemoteFlags(),
+	} {
+		remoteCaptureCmd.Flags().AddFlagSet(fs)
+	}
 }
 
 func runRemoteCapture(cmd *cobra.Command, args []string) error {
@@ -51,19 +51,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		filter = args[0]
 	}
 
-	addr, err := cmd.Flags().GetString("server")
-	if err != nil {
-		return err
-	}
-	reqTimeout, err := cmd.Flags().GetDuration("request-timeout")
-	if err != nil {
-		return err
-	}
-	connTimeout, err := cmd.Flags().GetDuration("connection-timeout")
-	if err != nil {
-		return err
-	}
-	nodeName, err := cmd.Flags().GetString("node-name")
+	remoteOpts, err := getRemoteOpts(cmd.Flags())
 	if err != nil {
 		return err
 	}
@@ -71,6 +59,14 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	captureOpts, err := getCaptureOpts(ctx, filter, cmd.Flags())
 	if err != nil {
 		return err
+	}
+
+	if len(captureOpts.K8sPod) > 1 {
+		return errors.New("remote-capture only supports a single pod filter")
+	}
+	var podName string
+	if len(captureOpts.K8sPod) == 1 {
+		podName = captureOpts.K8sPod[0]
 	}
 
 	req := &capperpb.CaptureRequest{
@@ -81,39 +77,23 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		Duration:   durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
 		K8SPodFilter: &capperpb.K8SPodFilter{
 			Namespace: captureOpts.K8sNamespace,
-			Pod:       captureOpts.K8sPod,
+			Pod:       podName,
 		},
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
-		NodeName:          nodeName,
+		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
 	}
-	return remoteCapture(ctx, captureOpts.Logger, addr, connTimeout, reqTimeout, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	return remoteCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
-func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeout, reqTimeout time.Duration, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
-	var outputDir string
-	if outputFile != "" {
-		fi, err := os.Stat(outputFile)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err == nil && fi.IsDir() {
-			outputDir = outputFile
-		}
-	}
-
-	printPackets := outputFile == "" || alwaysPrint
-	// merging packets is required to print them or send them to a non-directory file output
-	singleFileOutput := (outputFile != "" && outputDir == "")
-	mergePackets := printPackets || singleFileOutput
-
+func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
 	clock := clockwork.NewRealClock()
-	log.Debug("connecting to server", "server", addr)
+	log.Debug("connecting to server", "server", remoteOpts.Address)
 	connCtx := ctx
 	connCancel := func() {}
-	if connTimeout != 0 {
-		connCtx, connCancel = context.WithTimeout(ctx, connTimeout)
+	if remoteOpts.ConnectionTimeout != 0 {
+		connCtx, connCancel = context.WithTimeout(ctx, remoteOpts.ConnectionTimeout)
 	}
-	conn, err := grpc.DialContext(connCtx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.DialContext(connCtx, remoteOpts.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	connCancel()
 	if err != nil {
 		return fmt.Errorf("error connecting to server: %w", err)
@@ -123,8 +103,8 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 
 	reqCtx := ctx
 	var reqCancel context.CancelFunc
-	if reqTimeout != 0 {
-		reqCtx, reqCancel = context.WithTimeout(ctx, reqTimeout)
+	if remoteOpts.RequestTimeout != 0 {
+		reqCtx, reqCancel = context.WithTimeout(ctx, remoteOpts.RequestTimeout)
 		defer reqCancel()
 	}
 
@@ -137,75 +117,26 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	log.Info("capture started", "interface", req.GetInterface(), "snaplen", req.GetSnaplen(), "promisc", !req.GetNoPromiscuousMode(), "num_packets", req.GetNumPackets(), "duration", req.GetDuration())
+	log.Info("capture started")
 	defer func() {
-		log.Info("capture finished", "interface", req.GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
+		log.Info("capture finished", "packets", packetsTotal, "capture_duration", clock.Since(start))
 	}()
 
-	linkTypeCh := make(chan layers.LinkType)
+	pipeReader, pipeWriter := io.Pipe()
+	// These will be closed when the goroutine returns, resulting in the
+	// PacketsCtx below returning.
+	defer pipeReader.Close()
 
-	var eg *errgroup.Group
-	eg, ctx = errgroup.WithContext(ctx)
-	var merger *capture.PacketMerger
-	if mergePackets {
-		log.Debug("starting packet merger")
-		heapDrainThreshold := 10
-		flushInterval := time.Second
-		mergeBufferSize := 100
-		merger = capture.NewPacketMerger(log, nil, heapDrainThreshold, flushInterval, mergeBufferSize, 0)
-
-		eg.Go(func() error {
-			var handlers []capture.PacketHandler
-			if printPackets {
-				handlers = append(handlers, capture.PacketPrinterHandler)
-			}
-
-			if singleFileOutput {
-				var writer io.Writer
-				if outputFile == "-" {
-					writer = os.Stdout
-				} else {
-					f, err := os.Create(outputFile)
-					if err != nil {
-						return fmt.Errorf("error opening output: %w", err)
-					}
-					writer = f
-					defer f.Close()
-				}
-
-				// We need the linkType to create the writer.
-				// This will be set based on the first packet's linkType when we
-				// receive it from the stream
-				var linkType layers.LinkType
-				if linkType == layers.LinkTypeNull {
-					select {
-					case linkType = <-linkTypeCh:
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				}
-
-				writeHandler, err := capture.NewPcapWriterHandler(writer, linkType, uint32(req.GetSnaplen()))
-				if err != nil {
-					return err
-				}
-				handlers = append(handlers, writeHandler)
-			}
-			handler := capture.ChainPacketHandlers(handlers...)
-			for packet := range merger.PacketsCtx(ctx) {
-				if err := handler.HandlePacket(packet); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+	reader, err := newLazyPcapReader(pipeReader)
+	if err != nil {
+		return err
 	}
 
+	eg, ctx := errgroup.WithContext(ctx)
+
 	eg.Go(func() error {
-		configuredLinkType := false
-		writers := make(map[string]io.Writer)
+		defer pipeWriter.Close()
 		for {
-			// Read packets from the gRPC stream and send them to the reader via the pipeWriter
 			resp, err := stream.Recv()
 			if status.Code(err) == codes.Canceled {
 				return nil
@@ -217,71 +148,59 @@ func remoteCapture(ctx context.Context, log *slog.Logger, addr string, connTimeo
 				return fmt.Errorf("error reading from stream: %w", err)
 			}
 
-			// Every gRPC message contains a single packet
-			packetsTotal++
-
-			identifier := resp.GetIdentifier()
 			data := resp.GetData()
-			linkType := layers.LinkType(resp.GetLinkType())
 
-			// When writing to a file, we need to know the linkType so we can write the header,
-			// so send it to the merger.
-			if singleFileOutput && !configuredLinkType {
-				linkTypeCh <- linkType
-				configuredLinkType = true
-				close(linkTypeCh)
-			}
-
-			// Get the writer for the given packet source
-			writer, exists := writers[identifier]
-			if !exists {
-				// If we're merging packets, we need to parse them and send them to the merger.
-				if mergePackets {
-					// Create a pipe that our pcapReader can read from, and set the
-					// writer for this identity to the pipeWriter which in turn, will
-					// write to the pcapReader that the merger is reading from.
-					pipeReader, pipeWriter := io.Pipe()
-					// These will be closed when the goroutine returns, resulting in the
-					// PacketsCtx below returning.
-					defer pipeWriter.Close()
-					defer pipeReader.Close()
-					writer = pipeWriter
-
-					pcapReader, err := newLazyPcapReader(pipeReader)
-					if err != nil {
-						return err
-					}
-
-					src := gopacket.NewPacketSource(pcapReader, linkType)
-					merger.AddSource(capture.NamedPacketSource{
-						Name:         identifier,
-						PacketSource: src,
-					})
-
-				} else if outputDir != "" {
-					// If we're writing to a directory, then store each output stream into
-					// it's own file in the specified directory.
-					// If we're writing to a single file, that's handled in the merger goroutine instead.
-
-					// The packet identifier is the file name, it contains the peer
-					// hostname, netns, and interface and the .pcap extension.
-					f, err := os.Create(filepath.Join(outputDir, identifier))
-					if err != nil {
-						return fmt.Errorf("error opening output: %w", err)
-					}
-					defer f.Close()
-					writer = f
-				}
-
-				writers[identifier] = writer
-			}
-
-			// Write to our final destination.
-			_, err = writer.Write(data)
+			_, err = pipeWriter.Write(data)
 			if err != nil {
 				return err
 			}
 		}
+	})
+
+	eg.Go(func() error {
+		linkType := reader.LinkType()
+
+		var handlers []capture.PacketHandler
+		if alwaysPrint || outputFile == "" {
+			handlers = append(handlers, capture.PacketPrinterHandler)
+		}
+		if outputFile != "" {
+			var w io.Writer
+			if outputFile == "-" {
+				w = os.Stdout
+			} else {
+				f, err := os.Create(outputFile)
+				if err != nil {
+					return fmt.Errorf("error opening output: %w", err)
+				}
+				w = f
+				defer f.Close()
+			}
+			writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
+			if err != nil {
+				return err
+			}
+			handlers = append(handlers, writeHandler)
+		}
+		counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
+			packetsTotal++
+			return nil
+		})
+		handlers = append(handlers, counterHandler)
+		handler := capture.ChainPacketHandlers(handlers...)
+
+		packetSource := gopacket.NewPacketSource(reader, linkType)
+		packetsCh := packetSource.PacketsCtx(ctx)
+
+		for packet := range packetsCh {
+			if err := handler.HandlePacket(packet); err != nil {
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				return err
+			}
+		}
+		return nil
 	})
 
 	err = eg.Wait()

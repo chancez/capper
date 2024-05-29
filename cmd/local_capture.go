@@ -55,7 +55,7 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		switch {
 		case len(netNamespaces) > 0:
 			flag = "--netns"
-		case captureOpts.K8sPod != "":
+		case len(captureOpts.K8sPod) != 0:
 			flag = "--k8s-pod"
 		case captureOpts.K8sNamespace != "":
 			flag = "--k8s-namespace"
@@ -65,7 +65,12 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if captureOpts.K8sNamespace != "" && captureOpts.K8sPod != "" {
+	if len(captureOpts.K8sPod) > 1 {
+		return errors.New("local-capture only supports a single pod filter")
+	}
+	if captureOpts.K8sNamespace != "" && len(captureOpts.K8sPod) != 0 {
+		podName := captureOpts.K8sPod[0]
+
 		containerdSock := "/run/containerd/containerd.sock"
 		captureOpts.Logger.Debug("connecting to containerd", "addr", containerdSock)
 		client, err := containerd.New(containerdSock)
@@ -74,15 +79,15 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		}
 		defer client.Close()
 
-		captureOpts.Logger.Debug("looking up k8s pod in containerd", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace)
-		netns, err := containerd.GetPodNetns(ctx, client, captureOpts.K8sPod, captureOpts.K8sNamespace)
+		captureOpts.Logger.Debug("looking up k8s pod in containerd", "pod", podName, "namespace", captureOpts.K8sNamespace)
+		netns, err := containerd.GetPodNetns(ctx, client, podName, captureOpts.K8sNamespace)
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
 		if netns == "" {
-			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, captureOpts.K8sPod)
+			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, podName)
 		}
-		captureOpts.Logger.Debug("found netns for pod", "pod", captureOpts.K8sPod, "namespace", captureOpts.K8sNamespace, "netns", netns)
+		captureOpts.Logger.Debug("found netns for pod", "pod", podName, "namespace", captureOpts.K8sNamespace, "netns", netns)
 		netNamespaces = append(netNamespaces, netns)
 	}
 

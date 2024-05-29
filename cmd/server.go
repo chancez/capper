@@ -95,23 +95,28 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts
 	}
 	defer serf.Leave()
 
-	s := newGRPCServer(logger, &server{
+	srv := newGRPCServer(logger)
+	capperServer := &server{
 		clock:            clockwork.NewRealClock(),
 		log:              logger,
 		containerdClient: containerdClient,
 		nodeName:         serfOpts.NodeName,
 		serf:             serf,
-	})
+	}
+
+	capperpb.RegisterCapperServer(srv, capperServer)
+	healthpb.RegisterHealthServer(srv, health.NewServer())
+	reflection.Register(srv)
 
 	go func() {
 		<-ctx.Done()
 		logger.Info("got signal, shutting down server")
-		s.GracefulStop()
+		srv.GracefulStop()
 	}()
 
 	logger.Info("starting server", "listen-address", listen)
 	defer logger.Info("server has exited")
-	if err := s.Serve(lis); err != nil {
+	if err := srv.Serve(lis); err != nil {
 		return fmt.Errorf("failed to serve: %w", err)
 	}
 	return nil
@@ -144,13 +149,9 @@ func (s *server) getPodNetns(ctx context.Context, pod, namespace string) (string
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
-	if req.GetNodeName() != "" && req.GetNodeName() != s.nodeName {
-		return status.Errorf(codes.InvalidArgument, "invalid node_name filter %s, node=%s", req.GetNodeName(), s.nodeName)
-	}
-
-	var netns string
 	pod := req.GetK8SPodFilter().GetPod()
 	namespace := req.GetK8SPodFilter().GetNamespace()
+	var netns string
 	if pod != "" && namespace != "" {
 		var err error
 		netns, err = s.getPodNetns(ctx, pod, namespace)
@@ -178,8 +179,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	identifier := normalizeFilename(s.nodeName, netns, ifaces)
-	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), identifier, stream)
+	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, ifaces, stream)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -192,7 +192,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, identifier string, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, ifaces []string, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
 	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
 	if err != nil {
@@ -201,9 +201,10 @@ func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, identifier
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
-			Identifier: identifier,
-			Data:       buf.Bytes(),
-			LinkType:   int64(linkType),
+			Data:      buf.Bytes(),
+			LinkType:  int64(linkType),
+			Netns:     netns,
+			Interface: ifaces,
 		}); err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.Canceled || errCode == codes.Unavailable {
@@ -224,7 +225,7 @@ func InterceptorLogger(l *slog.Logger) logging.Logger {
 	})
 }
 
-func newGRPCServer(logger *slog.Logger, capperSrv capperpb.CapperServer) *grpc.Server {
+func newGRPCServer(logger *slog.Logger) *grpc.Server {
 	opts := []logging.Option{
 		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
 		logging.WithCodes(logging.DefaultErrorToCode),
@@ -241,9 +242,6 @@ func newGRPCServer(logger *slog.Logger, capperSrv capperpb.CapperServer) *grpc.S
 		),
 	)
 
-	capperpb.RegisterCapperServer(s, capperSrv)
-	healthpb.RegisterHealthServer(s, health.NewServer())
-	reflection.Register(s)
 	return s
 }
 

@@ -1,9 +1,8 @@
 syntax = "proto3";
 
+package capper;
 
 import "google/protobuf/duration.proto";
-
-package capper;
 
 option go_package = "github.com/chancez/capper/proto/capper";
 
@@ -20,7 +19,6 @@ message CaptureRequest {
   K8sPodFilter k8s_pod_filter = 7;
   bool no_promiscuous_mode = 8;
   int64 buffer_size = 9;
-  string node_name = 10;
 }
 
 message K8sPodFilter {
@@ -30,6 +28,7 @@ message K8sPodFilter {
 
 message CaptureResponse {
   bytes data = 1;
-  string identifier = 2;
-  int64 link_type = 3;
+  int64 link_type = 2;
+  repeated string interface = 3;
+  string netns = 4;
 }

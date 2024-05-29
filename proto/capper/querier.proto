@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package capper;
+
+import "proto/capper/capper.proto";
+
+option go_package = "github.com/chancez/capper/proto/capper";
+
+service Querier {
+  rpc CaptureQuery(CaptureQueryRequest) returns (stream CaptureQueryResponse) {}
+}
+
+message CaptureQueryRequest {
+  repeated CaptureQueryTarget targets = 1;
+  capper.CaptureRequest capture_request = 2;
+}
+
+message CaptureQueryTarget {
+  oneof target {
+    string node = 1;
+    capper.K8sPodFilter pod = 2;
+  };
+}
+
+message CaptureQueryResponse {
+  bytes data = 1;
+  string identifier = 2;
+  int64 link_type = 3;
+  string node_name = 4;
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/spf13/pflag"
@@ -16,7 +17,7 @@ type captureOpts struct {
 	CaptureConfig capture.Config
 	OutputFile    string
 	AlwaysPrint   bool
-	K8sPod        string
+	K8sPod        []string
 	K8sNamespace  string
 }
 
@@ -30,8 +31,8 @@ func newCaptureFlags() *pflag.FlagSet {
 	fs.BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
 	fs.DurationP("capture-duration", "d", 0, "Duration to capture packets.")
-	fs.String("k8s-pod", "", "Run the capture on the target k8s pod. Requires containerd. Must also set k8s-namespace.")
-	fs.String("k8s-namespace", "", "Run the capture on the target k8s pod in namespace. Requires containerd. Must also set k8s-pod.")
+	fs.StringSlice("k8s-pod", nil, "Run the capture on the specified k8s pod(s). Must also set k8s-namespace.")
+	fs.String("k8s-namespace", "default", "Specify namespace of the pods to capture.")
 	fs.String("log-level", "info", "Configure the log level.")
 	return fs
 }
@@ -69,7 +70,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	k8sPod, err := fs.GetString("k8s-pod")
+	k8sPod, err := fs.GetStringSlice("k8s-pod")
 	if err != nil {
 		return nil, err
 	}
@@ -140,5 +141,39 @@ func getSerfOpts(fs *pflag.FlagSet) (serfOpts, error) {
 		NodeName:   nodeName,
 		Peers:      serfPeers,
 		ListenAddr: serfListen,
+	}, nil
+}
+
+func newRemoteFlags() *pflag.FlagSet {
+	fs := pflag.NewFlagSet("remote-flags", pflag.ExitOnError)
+	fs.StringP("server", "a", "127.0.0.1:48999", "Capper address to connect to")
+	fs.Duration("request-timeout", 0, "Request timeout")
+	fs.Duration("connection-timeout", 10*time.Second, "Connection timeout")
+	return fs
+}
+
+type remoteOpts struct {
+	Address           string
+	RequestTimeout    time.Duration
+	ConnectionTimeout time.Duration
+}
+
+func getRemoteOpts(fs *pflag.FlagSet) (remoteOpts, error) {
+	addr, err := fs.GetString("server")
+	if err != nil {
+		return remoteOpts{}, err
+	}
+	reqTimeout, err := fs.GetDuration("request-timeout")
+	if err != nil {
+		return remoteOpts{}, err
+	}
+	connTimeout, err := fs.GetDuration("connection-timeout")
+	if err != nil {
+		return remoteOpts{}, err
+	}
+	return remoteOpts{
+		Address:           addr,
+		RequestTimeout:    reqTimeout,
+		ConnectionTimeout: connTimeout,
 	}, nil
 }
