@@ -190,7 +190,7 @@ func (s *server) updateNodeMetadata(ctx context.Context) error {
 				}
 			}
 			if pod.GetNamespace() != "" && pod.GetName() != "" {
-				newPods[pod.GetNamespace()+"/"+pod.GetName()] = pod
+				newPods[podMapKey(pod)] = pod
 			}
 		}
 
@@ -448,4 +448,8 @@ func newSerf(listen string, nodeName string, peers []string, role string) (*serf
 		return nil, fmt.Errorf("error adding peers to serf: %w", err)
 	}
 	return serf, nil
+}
+
+func podMapKey(pod *capperpb.Pod) string {
+	return pod.GetNamespace() + "/" + pod.GetName()
 }
