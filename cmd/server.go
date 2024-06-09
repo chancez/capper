@@ -251,33 +251,34 @@ func (s *server) updateNodeMetadata(ctx context.Context) error {
 	return nil
 }
 
-func (s *server) getPodNetns(ctx context.Context, pod, namespace string) (string, error) {
+func (s *server) getPod(ctx context.Context, podName, namespace string) (containerdutil.Pod, error) {
 	if s.containerdClient == nil {
-		return "", status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
+		return containerdutil.Pod{}, status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
 	}
-	s.log.Debug("looking up k8s pod in containerd", "pod", pod, "namespace", namespace)
-	podNetns, err := containerdutil.GetPodNetns(ctx, s.containerdClient, pod, namespace)
+	s.log.Debug("looking up k8s pod in containerd", "pod", podName, "namespace", namespace)
+	pod, err := containerdutil.GetPod(ctx, s.containerdClient, podName, namespace)
 	if err != nil {
-		return "", status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
+		return containerdutil.Pod{}, status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
 	}
-	if podNetns == "" {
-		return "", status.Errorf(codes.NotFound, "could not find netns for pod '%s/%s'", namespace, pod)
+	if pod.Name == "" {
+		return containerdutil.Pod{}, status.Errorf(codes.NotFound, "could not find pod '%s/%s'", namespace, podName)
 	}
-	s.log.Debug("found netns for pod", "pod", pod, "namespace", namespace, "netns", podNetns)
-	return podNetns, nil
+	s.log.Debug("found pod", "pod", pod.Name, "namespace", pod.Namespace, "netns", pod.Netns)
+	return pod, nil
 }
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
-	pod := req.GetK8SPodFilter().GetPod()
-	namespace := req.GetK8SPodFilter().GetNamespace()
 	var netns string
-	if pod != "" && namespace != "" {
+	if req.GetK8SPodFilter() != nil {
+		podName := req.GetK8SPodFilter().GetPod()
+		namespace := req.GetK8SPodFilter().GetNamespace()
 		var err error
-		netns, err = s.getPodNetns(ctx, pod, namespace)
+		pod, err := s.getPod(ctx, podName, namespace)
 		if err != nil {
-			return status.Errorf(codes.Internal, "error getting netns: %s", err)
+			return status.Errorf(codes.Internal, "error getting pod: %s", err)
 		}
+		netns = pod.Netns
 	}
 
 	conf := capture.Config{

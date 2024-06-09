@@ -80,15 +80,15 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		defer client.Close()
 
 		captureOpts.Logger.Debug("looking up k8s pod in containerd", "pod", podName, "namespace", captureOpts.K8sNamespace)
-		netns, err := containerd.GetPodNetns(ctx, client, podName, captureOpts.K8sNamespace)
+		pod, err := containerd.GetPod(ctx, client, podName, captureOpts.K8sNamespace)
 		if err != nil {
 			return fmt.Errorf("error getting pod namespace: %w", err)
 		}
-		if netns == "" {
-			return fmt.Errorf("could not find netns for pod '%s/%s'", captureOpts.K8sNamespace, podName)
+		if pod.Name == "" {
+			return fmt.Errorf("could not find pod '%s/%s'", captureOpts.K8sNamespace, podName)
 		}
-		captureOpts.Logger.Debug("found netns for pod", "pod", podName, "namespace", captureOpts.K8sNamespace, "netns", netns)
-		netNamespaces = append(netNamespaces, netns)
+		captureOpts.Logger.Debug("found pod", "pod", pod.Name, "namespace", captureOpts.K8sNamespace, "netns", pod.Netns)
+		netNamespaces = append(netNamespaces, pod.Netns)
 	}
 
 	if len(netNamespaces) > 1 {
