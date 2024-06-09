@@ -72,7 +72,9 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, serfOpt
 	}
 
 	logger.Info("starting serf", "listen", serfOpts.ListenAddr, "node-name", serfOpts.NodeName, "peers", serfOpts.Peers)
-	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "gateway")
+
+	eventCh := make(chan serf.Event)
+	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "gateway", eventCh)
 	if err != nil {
 		return fmt.Errorf("error creating serf cluster: %w", err)
 	}
@@ -104,7 +106,7 @@ func runGateway(ctx context.Context, logger *slog.Logger, listen string, serfOpt
 	})
 
 	eg.Go(func() error {
-		return gw.runPeerMetadataUpdater(ctx, logger)
+		return gw.runPeerMetadataUpdater(ctx, logger, eventCh)
 	})
 
 	if err := eg.Wait(); err != nil {
@@ -128,12 +130,77 @@ type gateway struct {
 	peerPods       map[string]map[string]*capperpb.Pod
 }
 
-func (g *gateway) runPeerMetadataUpdater(ctx context.Context, logger *slog.Logger) error {
+func (g *gateway) runPeerMetadataUpdater(ctx context.Context, logger *slog.Logger, eventCh chan serf.Event) error {
 	t := time.NewTicker(nodeMetadataUpdateInterval)
 	defer t.Stop()
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
+
+	reconcilePeers := func() error {
+		for _, peer := range g.getPeers() {
+			peer := peer
+			g.peerPodsMu.Lock()
+			_, ok := g.peerPods[peer.Name]
+			g.peerPodsMu.Unlock()
+			// If the peer already exists in our map, then there's already a
+			// subscriber goroutine running and we don't need to continue processing this peer
+			if ok {
+				continue
+			}
+
+			// Start a new subscriber goroutine
+			wg.Add(1)
+			go func() {
+				g.peerPodsMu.Lock()
+				// Create a new map entry for this peers list of pods
+				g.peerPods[peer.Name] = make(map[string]*capperpb.Pod)
+				g.peerPodsMu.Unlock()
+
+				defer func() {
+					g.peerPodsMu.Lock()
+					delete(g.peerPods, peer.Name)
+					g.peerPodsMu.Unlock()
+					g.log.Debug("peer NodeUpdate stream has stopped", "peer", peer.Name)
+				}()
+
+				conn, err := g.getClient(ctx, peer)
+				if err != nil {
+					return
+				}
+				c := capperpb.NewCapperClient(conn)
+				g.log.Debug("starting peer NodeUpdate stream", "peer", peer.Name)
+
+				nodeMetadataStream, err := c.NodeMetadata(ctx, &capperpb.NodeMetadataRequest{})
+				if err != nil {
+					return
+				}
+
+				for {
+					resp, err := nodeMetadataStream.Recv()
+					if err == io.EOF {
+						return
+					}
+					if status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
+						// TOOD: retry unavailable: https://github.com/grpc/grpc-go/blob/master/examples/features/retry/client/main.go#L36
+						return
+					}
+					if err != nil {
+						g.log.Error("error receiving from peer metadata stream", "error", err)
+						return
+					}
+					g.updatePeerMetadata(peer, resp.GetUpdates())
+				}
+			}()
+		}
+		return nil
+	}
+
+	// Reconcile once before we loop since we may have already missed some events
+	// and the ticker may not trigger for a bit.
+	if err := reconcilePeers(); err != nil {
+		return err
+	}
 
 	for {
 		select {
@@ -141,62 +208,15 @@ func (g *gateway) runPeerMetadataUpdater(ctx context.Context, logger *slog.Logge
 			logger.Info("got signal, stopping subscriber to node metadata updates")
 			// TODO: Should we  wait for all the subscribers goroutines to stop?
 			return ctx.Err()
+		case <-eventCh:
+			// Got a serf event, reconcile
+			if err := reconcilePeers(); err != nil {
+				return err
+			}
 		case <-t.C:
-			// Periodically check for new peers
-			for _, peer := range g.getPeers() {
-				peer := peer
-				g.peerPodsMu.Lock()
-				_, ok := g.peerPods[peer.Name]
-				g.peerPodsMu.Unlock()
-				// If the peer already exists in our map, then there's already a
-				// subscriber goroutine running and we don't need to continue processing this peer
-				if ok {
-					continue
-				}
-
-				// Start a new subscriber goroutine
-				wg.Add(1)
-				go func() {
-					g.peerPodsMu.Lock()
-					// Create a new map entry for this peers list of pods
-					g.peerPods[peer.Name] = make(map[string]*capperpb.Pod)
-					g.peerPodsMu.Unlock()
-
-					defer func() {
-						g.peerPodsMu.Lock()
-						delete(g.peerPods, peer.Name)
-						g.peerPodsMu.Unlock()
-						g.log.Debug("peer NodeUpdate stream has stopped", "peer", peer.Name)
-					}()
-
-					conn, err := g.getClient(ctx, peer)
-					if err != nil {
-						return
-					}
-					c := capperpb.NewCapperClient(conn)
-					g.log.Debug("starting peer NodeUpdate stream", "peer", peer.Name)
-
-					nodeMetadataStream, err := c.NodeMetadata(ctx, &capperpb.NodeMetadataRequest{})
-					if err != nil {
-						return
-					}
-
-					for {
-						resp, err := nodeMetadataStream.Recv()
-						if err == io.EOF {
-							return
-						}
-						if status.Code(err) == codes.Canceled || status.Code(err) == codes.Unavailable {
-							// TOOD: retry unavailable: https://github.com/grpc/grpc-go/blob/master/examples/features/retry/client/main.go#L36
-							return
-						}
-						if err != nil {
-							g.log.Error("error receiving from peer metadata stream", "error", err)
-							return
-						}
-						g.updatePeerMetadata(peer, resp.GetUpdates())
-					}
-				}()
+			// Periodically re-list peers in case we missed an event for some reason
+			if err := reconcilePeers(); err != nil {
+				return err
 			}
 		}
 	}

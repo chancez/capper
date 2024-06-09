@@ -95,7 +95,7 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts
 	}
 
 	logger.Info("starting serf", "listen", serfOpts.ListenAddr, "node-name", serfOpts.NodeName, "peers", serfOpts.Peers)
-	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "server")
+	serf, err := newSerf(serfOpts.ListenAddr, serfOpts.NodeName, serfOpts.Peers, "server", nil)
 	if err != nil {
 		return fmt.Errorf("error creating serf cluster: %w", err)
 	}
@@ -420,7 +420,7 @@ func newGRPCServer(logger *slog.Logger) *grpc.Server {
 	return s
 }
 
-func newSerf(listen string, nodeName string, peers []string, role string) (*serf.Serf, error) {
+func newSerf(listen string, nodeName string, peers []string, role string, eventCh chan serf.Event) (*serf.Serf, error) {
 	serfAddr, serfPortStr, err := net.SplitHostPort(listen)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse serf addr: %w", err)
@@ -438,6 +438,7 @@ func newSerf(listen string, nodeName string, peers []string, role string) (*serf
 	serfConf.Tags = map[string]string{
 		"role": role,
 	}
+	serfConf.EventCh = eventCh
 	serf, err := serf.Create(serfConf)
 	if err != nil {
 		return nil, fmt.Errorf("error creating serf cluster: %w", err)
