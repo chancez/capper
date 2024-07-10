@@ -6,6 +6,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -83,6 +84,7 @@ func runServer(ctx context.Context, logger *slog.Logger, listen string, serfOpts
 	}
 
 	var containerdClient *containerd.Client
+	// TODO: replace with CRI-O implementation
 	if enableContainerd {
 		containerdSock := "/run/containerd/containerd.sock"
 		logger.Debug("connecting to containerd", "addr", containerdSock)
@@ -251,18 +253,19 @@ func (s *server) updateNodeMetadata(ctx context.Context) error {
 	return nil
 }
 
-func (s *server) getPod(ctx context.Context, podName, namespace string) (containerdutil.Pod, error) {
+func (s *server) getPod(ctx context.Context, podName, namespace string) (*containerdutil.Pod, error) {
 	if s.containerdClient == nil {
-		return containerdutil.Pod{}, status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
+		return nil, status.Error(codes.InvalidArgument, "containerd not enabled, querying k8s pod is disabled")
 	}
 	s.log.Debug("looking up k8s pod in containerd", "pod", podName, "namespace", namespace)
 	pod, err := containerdutil.GetPod(ctx, s.containerdClient, podName, namespace)
 	if err != nil {
-		return containerdutil.Pod{}, status.Errorf(codes.Internal, "error getting pod namespace: %s", err)
+		if errors.Is(err, containerdutil.ErrPodNotFound) {
+			return nil, status.Errorf(codes.NotFound, "could not find pod '%s/%s'", namespace, podName)
+		}
+		return nil, status.Errorf(codes.Internal, "error getting pod '%s/%s': %s", namespace, podName, err)
 	}
-	if pod.Name == "" {
-		return containerdutil.Pod{}, status.Errorf(codes.NotFound, "could not find pod '%s/%s'", namespace, podName)
-	}
+
 	s.log.Debug("found pod", "pod", pod.Name, "namespace", pod.Namespace, "netns", pod.Netns)
 	return pod, nil
 }
