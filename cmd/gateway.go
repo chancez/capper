@@ -222,6 +222,15 @@ func (g *gateway) runPeerMetadataUpdater(ctx context.Context, logger *slog.Logge
 	}
 }
 
+func (g *gateway) podExists(peer serf.Member, pod *capperpb.Pod) bool {
+	g.peerPodsMu.Lock()
+	defer g.peerPodsMu.Unlock()
+	peerPodsMap := g.peerPods[peer.Name]
+	key := podMapKey(pod)
+	_, ok := peerPodsMap[key]
+	return ok
+}
+
 func (g *gateway) updatePeerMetadata(peer serf.Member, update *capperpb.NodeMetadataUpdate) {
 	g.peerPodsMu.Lock()
 	defer g.peerPodsMu.Unlock()
@@ -285,11 +294,13 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 		})
 	}
 	// Make a request to each node, for each pod to be queried.
-	// TODO: Optimize this to only query nodes with the correct pods (using serf to gossip the pods on each node?)
 	for _, pod := range pods {
 		for _, peer := range peers {
 			pod := pod
 			peer := peer
+			if !g.podExists(peer, pod) {
+				continue
+			}
 			eg.Go(func() error {
 				captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 				// Override the pod filter to the one specified in the target
