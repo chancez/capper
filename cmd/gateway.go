@@ -249,7 +249,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	ctx := stream.Context()
 	peers := g.getPeers()
 	var nodes []serf.Member
-	var pods []*capperpb.K8SPodFilter
+	var pods []*capperpb.Pod
 	for _, target := range req.GetTargets() {
 		switch targetVal := target.GetTarget().(type) {
 		case *capperpb.CaptureQueryTarget_Node:

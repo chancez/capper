@@ -75,9 +75,9 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		Snaplen:    int64(captureOpts.CaptureConfig.Snaplen),
 		NumPackets: captureOpts.CaptureConfig.NumPackets,
 		Duration:   durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
-		K8SPodFilter: &capperpb.K8SPodFilter{
+		K8SPodFilter: &capperpb.Pod{
 			Namespace: captureOpts.K8sNamespace,
-			Pod:       podName,
+			Name:      podName,
 		},
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
 		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),

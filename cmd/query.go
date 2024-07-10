@@ -97,9 +97,9 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	for _, pod := range captureOpts.K8sPod {
 		targets = append(targets, &capperpb.CaptureQueryTarget{
 			Target: &capperpb.CaptureQueryTarget_Pod{
-				Pod: &capperpb.K8SPodFilter{
+				Pod: &capperpb.Pod{
 					Namespace: captureOpts.K8sNamespace,
-					Pod:       pod,
+					Name:      pod,
 				},
 			},
 		})

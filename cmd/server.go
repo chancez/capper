@@ -271,7 +271,7 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 	ctx := stream.Context()
 	var netns string
 	if req.GetK8SPodFilter() != nil {
-		podName := req.GetK8SPodFilter().GetPod()
+		podName := req.GetK8SPodFilter().GetName()
 		namespace := req.GetK8SPodFilter().GetNamespace()
 		var err error
 		pod, err := s.getPod(ctx, podName, namespace)

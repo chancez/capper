@@ -18,7 +18,7 @@ message CaptureQueryRequest {
 message CaptureQueryTarget {
   oneof target {
     string node = 1;
-    capper.K8sPodFilter pod = 2;
+    capper.Pod pod = 2;
   };
 }
 

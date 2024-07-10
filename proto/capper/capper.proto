@@ -17,14 +17,9 @@ message CaptureRequest {
   google.protobuf.Duration duration = 3;
   repeated string interface = 4;
   int64 snaplen = 5;
-  K8sPodFilter k8s_pod_filter = 7;
+  Pod k8s_pod_filter = 7;
   bool no_promiscuous_mode = 8;
   int64 buffer_size = 9;
-}
-
-message K8sPodFilter {
-  string namespace = 1;
-  string pod = 2;
 }
 
 message CaptureResponse {
