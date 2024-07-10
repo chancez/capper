@@ -278,7 +278,10 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	for _, node := range nodes {
 		peer := node
 		eg.Go(func() error {
-			return g.captureQueryNode(ctx, peer, req.GetCaptureRequest(), stream)
+			return g.captureQueryNode(ctx, peer, req.GetCaptureRequest(), stream, queryTarget{
+				kind:  "node",
+				value: node.Name,
+			})
 		})
 	}
 	// Make a request to each node, for each pod to be queried.
@@ -291,13 +294,16 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 				captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 				// Override the pod filter to the one specified in the target
 				captureReq.K8SPodFilter = pod
-				err := g.captureQueryNode(ctx, peer, captureReq, stream)
+				err := g.captureQueryNode(ctx, peer, captureReq, stream, queryTarget{
+					kind:  "pod",
+					value: fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName()),
+				})
 				// Ignore not found since we're querying every node, and we know the
 				// pod is only going to be running on one of these nodes.
 				if status.Code(err) == codes.NotFound {
 					return nil
 				}
-				return err
+				return fmt.Errorf("error querying peer %s for pod: %s: %w", peer.Name, pod, err)
 			})
 		}
 	}
@@ -312,7 +318,12 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	return nil
 }
 
-func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Querier_CaptureQueryServer) error {
+type queryTarget struct {
+	kind  string
+	value string
+}
+
+func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Querier_CaptureQueryServer, target queryTarget) error {
 	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
 		return stream.Send(&capperpb.CaptureQueryResponse{
 			Data:       resp.GetData(),
@@ -321,7 +332,7 @@ func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *c
 			NodeName:   peer.Name,
 		})
 	})
-	return g.captureNode(ctx, peer, req, handler)
+	return g.captureNode(ctx, peer, req, handler, target)
 }
 
 type captureResponseHandler interface {
@@ -334,23 +345,23 @@ func (f captureResponseHandlerFunc) HandleResponse(resp *capperpb.CaptureRespons
 	return f(resp)
 }
 
-func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler) error {
+func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler, target queryTarget) error {
 	conn, err := s.getClient(ctx, peer)
 	if err != nil {
 		return err
 	}
 
 	c := capperpb.NewCapperClient(conn)
-	s.log.Debug("starting peer Capture stream", "peer", peer.Name)
+	s.log.Debug("starting peer Capture stream", "peer", peer.Name, "target_kind", target.kind, "target", target.value)
 	peerStream, err := c.Capture(ctx, req)
 	if err != nil {
 		return fmt.Errorf("error creating capture stream: %w", err)
 	}
 
 	// Begins reading from the stream
-	s.log.Debug("started reading from peer capture stream", "peer", peer.Name)
+	s.log.Debug("started reading from peer capture stream", "peer", peer.Name, "target_kind", target.kind, "target", target.value)
 	defer func() {
-		s.log.Debug("finished reading from peer capture stream", "peer", peer.Name)
+		s.log.Debug("finished reading from peer capture stream", "peer", peer.Name, "target_kind", target.kind, "target", target.value)
 	}()
 	for {
 		resp, err := peerStream.Recv()
@@ -382,7 +393,10 @@ func (s *gateway) captureMultiNodes(ctx context.Context, peers []serf.Member, re
 			continue
 		}
 		eg.Go(func() error {
-			return s.captureNode(ctx, peer, req, handler)
+			return s.captureNode(ctx, peer, req, handler, queryTarget{
+				kind:  "node",
+				value: peer.Name,
+			})
 		})
 	}
 	err := eg.Wait()
