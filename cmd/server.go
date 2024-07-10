@@ -276,7 +276,8 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		var err error
 		pod, err := s.getPod(ctx, podName, namespace)
 		if err != nil {
-			return status.Errorf(codes.Internal, "error getting pod: %s", err)
+			// don't wrap the error, getPod returns a grpc status error with codes set.
+			return err
 		}
 		netns = pod.Netns
 	}
