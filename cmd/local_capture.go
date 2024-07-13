@@ -13,6 +13,7 @@ import (
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/chancez/capper/pkg/containerd"
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -230,6 +231,25 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 		iface = ifaces[0]
 	}
 	return capture.NewBasic(ctx, log, iface, netns, conf)
+}
+
+func normalizePodFilename(pod *capperpb.Pod, ifaces []string) string {
+	var b strings.Builder
+	b.WriteString("pod:")
+	b.WriteString(pod.GetNamespace())
+	b.WriteString(":")
+	b.WriteString(pod.GetName())
+	if len(ifaces) != 0 {
+		b.WriteString(":ifaces:")
+		for i, iface := range ifaces {
+			b.WriteString(iface)
+			if i != len(ifaces)-1 {
+				b.WriteString(",")
+			}
+		}
+	}
+	b.WriteString(".pcap")
+	return b.String()
 }
 
 func normalizeFilename(host string, netns string, ifaces []string) string {
