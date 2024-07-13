@@ -33,7 +33,7 @@ func newCaptureFlags() *pflag.FlagSet {
 	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
 	fs.DurationP("capture-duration", "d", 0, "Duration to capture packets.")
 	fs.StringSlice("k8s-pod", nil, "Run the capture on the specified k8s pod(s). Must also set k8s-namespace.")
-	fs.String("k8s-namespace", "default", "Specify namespace of the pods to capture.")
+	fs.String("k8s-namespace", "", "Specify namespace of the pods to capture.")
 	fs.String("log-level", "info", "Configure the log level.")
 	return fs
 }

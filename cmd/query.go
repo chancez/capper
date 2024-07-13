@@ -94,6 +94,9 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			},
 		})
 	}
+	if captureOpts.K8sNamespace == "" {
+		captureOpts.K8sNamespace = "default"
+	}
 	for _, pod := range captureOpts.K8sPod {
 		targets = append(targets, &capperpb.CaptureQueryTarget{
 			Target: &capperpb.CaptureQueryTarget_Pod{

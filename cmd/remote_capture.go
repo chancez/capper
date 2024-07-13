@@ -69,6 +69,9 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		podName = captureOpts.K8sPod[0]
 	}
 
+	if captureOpts.K8sNamespace == "" {
+		captureOpts.K8sNamespace = "default"
+	}
 	req := &capperpb.CaptureRequest{
 		Interface:  captureOpts.Interfaces,
 		Filter:     captureOpts.Filter,
