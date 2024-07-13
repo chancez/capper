@@ -96,6 +96,10 @@ func (c *MultiCapture) Start(ctx context.Context, handler PacketHandler) error {
 
 	c.log.Info("multi capture started", "interfaces", c.ifaces, "link_type", c.LinkType())
 	defer func() {
+		err := handler.Flush()
+		if err != nil {
+			c.log.Error("error flushing handler", "interfaces", c.ifaces, "error", err)
+		}
 		c.log.Info("multi capture finished", "interfaces", c.ifaces, "packets", count, "capture_duration", clock.Since(start))
 	}()
 

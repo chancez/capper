@@ -189,6 +189,10 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 
 	c.log.Info("capture started", "interface", c.iface, "link_type", c.handle.LinkType(), "snaplen", c.conf.Snaplen, "promisc", c.conf.Promisc, "num_packets", c.conf.NumPackets, "duration", c.conf.CaptureDuration)
 	defer func() {
+		err := handler.Flush()
+		if err != nil {
+			c.log.Error("error flushing handler", "interface", c.iface, "error", err)
+		}
 		logFields := []any{"interface", c.iface, "packets", count, "capture_duration", c.clock.Since(start)}
 		stats, err := c.handle.Stats()
 		if err != nil {
