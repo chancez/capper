@@ -28,6 +28,7 @@ func newCaptureFlags() *pflag.FlagSet {
 	fs.BoolP("no-promiscuous-mode", "p", false, "Don't put the interface into promiscuous mode.")
 	fs.IntP("buffer-size", "B", 0, "Set the operating system capture buffer size (in bytes).") // TODO: Should we match tcpdump which has this in units of KiB?
 	fs.StringP("output-file", "w", "", "Store output into the file specified. Use '-' for stdout.")
+	fs.String("output-format", "pcap", "Output pcap in the specified format. Valid options are pcap and pcapng.")
 	fs.BoolP("print", "P", false, "Output the packet summary/details, even if writing raw packet data using the -o option.")
 	fs.Uint64P("capture-count", "c", 0, "Number of packets to capture.")
 	fs.DurationP("capture-duration", "d", 0, "Duration to capture packets.")
@@ -57,6 +58,17 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	outputFile, err := fs.GetString("output-file")
 	if err != nil {
 		return nil, err
+	}
+	outputFormat, err := fs.GetString("output-format")
+	if err != nil {
+		return nil, err
+	}
+	var format capture.PcapOutputFormat
+	switch outputFormat {
+	case "pcap":
+		format = capture.PcapFormat
+	case "pcapng":
+		format = capture.PcapNgFormat
 	}
 	alwaysPrint, err := fs.GetBool("print")
 	if err != nil {
@@ -99,6 +111,7 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 			Promisc:         !noPromisc,
 			NumPackets:      numPackets,
 			CaptureDuration: dur,
+			OutputFormat:    format,
 		},
 		OutputFile:   outputFile,
 		AlwaysPrint:  alwaysPrint,

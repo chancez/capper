@@ -3,6 +3,7 @@ package capture
 import (
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -38,6 +39,50 @@ func NewPcapWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32)
 
 func (pwh *PcapWriterHandler) HandlePacket(p gopacket.Packet) error {
 	if err := pwh.pcapWriter.WritePacket(p.Metadata().CaptureInfo, p.Data()); err != nil {
+		return fmt.Errorf("error writing packet: %w", err)
+	}
+	return nil
+}
+
+type PcapNgWriterHandler struct {
+	pcapngWriter *pcapgo.NgWriter
+	snaplen      uint32
+	iface        string
+}
+
+func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, iface string) (*PcapNgWriterHandler, error) {
+	intf := pcapgo.NgInterface{
+		Name:     iface,
+		LinkType: linkType,
+	}
+	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, pcapgo.DefaultNgWriterOptions)
+	if err != nil {
+		return nil, fmt.Errorf("error creating pcapng writer: %w", err)
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, fmt.Errorf("error listing interfaces : %w", err)
+	}
+
+	for _, otherIface := range ifaces {
+		if iface == otherIface.Name {
+			continue
+		}
+		pcapngWriter.AddInterface(pcapgo.NgInterface{
+			Name:     otherIface.Name,
+			LinkType: linkType,
+		})
+	}
+
+	return &PcapNgWriterHandler{
+		pcapngWriter: pcapngWriter,
+		snaplen:      snaplen,
+	}, nil
+}
+
+func (pwh *PcapNgWriterHandler) HandlePacket(p gopacket.Packet) error {
+	if err := pwh.pcapngWriter.WritePacket(p.Metadata().CaptureInfo, p.Data()); err != nil {
 		return fmt.Errorf("error writing packet: %w", err)
 	}
 	return nil
