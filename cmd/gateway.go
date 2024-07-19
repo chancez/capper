@@ -315,7 +315,10 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 				if status.Code(err) == codes.NotFound {
 					return nil
 				}
-				return fmt.Errorf("error querying peer %s for pod: %s: %w", peer.Name, pod, err)
+				if err != nil {
+					return fmt.Errorf("error querying peer %s for pod: %s: %w", peer.Name, pod, err)
+				}
+				return nil
 			})
 		}
 	}
