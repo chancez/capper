@@ -72,3 +72,5 @@ require (
 	google.golang.org/genproto v0.0.0-20240227224415-6ceb2ff114de // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240227224415-6ceb2ff114de // indirect
 )
+
+replace github.com/gopacket/gopacket => github.com/chancez/gopacket v1.2.1-0.20240719041229-5f4144d9b475

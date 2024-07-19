@@ -162,6 +162,8 @@ var ngEmptyStatistics = NgInterfaceStatistics{
 type NgInterface struct {
 	// Name is the name of the interface. This value might be empty if this option is missing.
 	Name string
+	// Index is the interface index
+	Index int
 	// Comment can be an arbitrary comment. This value might be empty if this option is missing.
 	Comment string
 	// Description is a description of the interface. This value might be empty if this option is missing.

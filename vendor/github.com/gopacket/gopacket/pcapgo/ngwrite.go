@@ -45,8 +45,11 @@ var DefaultNgInterface = NgInterface{
 type NgWriter struct {
 	w       *bufio.Writer
 	options NgWriterOptions
-	intf    uint32
-	buf     [28]byte
+	// current number of Interface IDs
+	intf uint32
+	// map from an interface index to it's interface ID
+	indexToID map[int]int
+	buf       [28]byte
 }
 
 // NewNgWriter initializes and returns a new writer. Additionally, one section and one interface (without statistics) is written to the file. Interface and section options are used from DefaultNgInterface and DefaultNgWriterOptions.
@@ -65,8 +68,9 @@ func NewNgWriter(w io.Writer, linkType layers.LinkType) (*NgWriter, error) {
 // Written files are in little endian format. Interface timestamp resolution is fixed to 9 (to match time.Time).
 func NewNgWriterInterface(w io.Writer, intf NgInterface, options NgWriterOptions) (*NgWriter, error) {
 	ret := &NgWriter{
-		w:       bufio.NewWriter(w),
-		options: options,
+		w:         bufio.NewWriter(w),
+		options:   options,
+		indexToID: make(map[int]int),
 	}
 	if err := ret.writeSectionHeader(); err != nil {
 		return nil, err
@@ -236,6 +240,7 @@ func (w *NgWriter) writeSectionHeader() error {
 // AddInterface adds the specified interface to the file, excluding statistics. Interface timestamp resolution is fixed to 9 (to match time.Time). Empty values are not written.
 func (w *NgWriter) AddInterface(intf NgInterface) (id int, err error) {
 	id = int(w.intf)
+	w.indexToID[intf.Index] = id
 	w.intf++
 
 	var scratch [7]ngOption
@@ -354,8 +359,9 @@ func (w *NgWriter) WriteInterfaceStats(intf int, stats NgInterfaceStatistics) er
 
 // WritePacket writes out packet with the given data and capture info. The given InterfaceIndex must already be added to the file. InterfaceIndex 0 is automatically added by the NewWriter* methods.
 func (w *NgWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
-	if ci.InterfaceIndex >= int(w.intf) || ci.InterfaceIndex < 0 {
-		return fmt.Errorf("Can't send statistics for non existent interface %d; have only %d interfaces", ci.InterfaceIndex, w.intf)
+	id, ok := w.indexToID[ci.InterfaceIndex]
+	if !ok {
+		return fmt.Errorf("Can't write packet for interface %d; not configured", ci.InterfaceIndex)
 	}
 	if ci.CaptureLength != len(data) {
 		return fmt.Errorf("capture length %d does not match data length %d", ci.CaptureLength, len(data))
@@ -372,7 +378,7 @@ func (w *NgWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
 
 	binary.LittleEndian.PutUint32(w.buf[:4], uint32(ngBlockTypeEnhancedPacket))
 	binary.LittleEndian.PutUint32(w.buf[4:8], length)
-	binary.LittleEndian.PutUint32(w.buf[8:12], uint32(ci.InterfaceIndex))
+	binary.LittleEndian.PutUint32(w.buf[8:12], uint32(id))
 	binary.LittleEndian.PutUint32(w.buf[12:16], uint32(ts>>32))
 	binary.LittleEndian.PutUint32(w.buf[16:20], uint32(ts))
 	binary.LittleEndian.PutUint32(w.buf[20:24], uint32(ci.CaptureLength))
