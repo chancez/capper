@@ -267,7 +267,6 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 	if req.GetK8SPodFilter() != nil {
 		podName := req.GetK8SPodFilter().GetName()
 		namespace := req.GetK8SPodFilter().GetNamespace()
-		var err error
 		pod, err := s.getPod(ctx, podName, namespace)
 		if err != nil {
 			// don't wrap the error, getPod returns a grpc status error with codes set.
