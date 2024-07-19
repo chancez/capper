@@ -177,12 +177,11 @@ func (s *server) updateNodeMetadata(ctx context.Context) error {
 		}
 		newPods := make(map[string]*capperpb.Pod)
 		for _, ctr := range containers {
-			pod := &capperpb.Pod{}
-			pod.Name, pod.Namespace, err = containerdutil.GetPodNameNamespace(ctx, ctr)
+			pod, err := containerdutil.GetContainerPod(ctx, ctr)
 			if err != nil {
 				return err
 			}
-			if pod.GetNamespace() != "" && pod.GetName() != "" {
+			if pod != nil {
 				newPods[podMapKey(pod)] = pod
 			}
 		}

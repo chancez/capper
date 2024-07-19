@@ -6,6 +6,8 @@ import (
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/namespaces"
+
+	capperpb "github.com/chancez/capper/proto/capper"
 )
 
 var ErrPodNotFound = errors.New("pod not found")
@@ -15,20 +17,25 @@ func New(addr string) (*containerd.Client, error) {
 }
 
 type Pod struct {
-	Name      string
-	Namespace string
-	Netns     string
+	*capperpb.Pod
+	Netns string
 }
 
-func GetPodNameNamespace(ctx context.Context, ctr containerd.Container) (namespace, name string, err error) {
+func GetContainerPod(ctx context.Context, ctr containerd.Container) (*capperpb.Pod, error) {
 	labels, err := ctr.Labels(ctx)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	name = labels["io.kubernetes.pod.name"]
-	namespace = labels["io.kubernetes.pod.namespace"]
-	return
+	name, ok1 := labels["io.kubernetes.pod.name"]
+	namespace, ok2 := labels["io.kubernetes.pod.namespace"]
+	if ok1 && ok2 {
+		return &capperpb.Pod{
+			Namespace: namespace,
+			Name:      name,
+		}, nil
+	}
+	return nil, nil
 }
 
 func GetPod(ctx context.Context, client *containerd.Client, podName, namespace string) (*Pod, error) {
@@ -42,34 +49,29 @@ func GetPod(ctx context.Context, client *containerd.Client, podName, namespace s
 	if err != nil {
 		return nil, err
 	}
-	var podCtr containerd.Container
 	for _, ctr := range cs {
-		foundPod, foundNamespace, err := GetPodNameNamespace(ctrCtx, ctr)
+		foundPod, err := GetContainerPod(ctrCtx, ctr)
 		if err != nil {
 			return nil, err
 		}
-		if foundNamespace != "" && foundPod != "" {
-			break
+		if foundPod == nil {
+			continue
 		}
-		podCtr = ctr
-	}
-	if podCtr == nil {
-		// no containers matching
-		return nil, ErrPodNotFound
-	}
-	spec, err := podCtr.Spec(ctrCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	pod := Pod{
-		Namespace: namespace,
-		Name:      podName,
-	}
-	for _, ns := range spec.Linux.Namespaces {
-		if ns.Type == "network" {
-			pod.Netns = ns.Path
+		spec, err := ctr.Spec(ctrCtx)
+		if err != nil {
+			return nil, err
 		}
+		var netns string
+		for _, ns := range spec.Linux.Namespaces {
+			if ns.Type == "network" {
+				netns = ns.Path
+			}
+		}
+		return &Pod{
+			Pod:   foundPod,
+			Netns: netns,
+		}, nil
 	}
-	return &pod, nil
+	// no containers matching
+	return nil, ErrPodNotFound
 }
