@@ -125,13 +125,13 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 			w = os.Stdout
 		} else {
 			fi, err := os.Stat(outputFile)
-			if err != nil {
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 
 			fileName := outputFile
 			// if the output is a directory, generate a filename and store it in that directory
-			if fi.IsDir() {
+			if err == nil && fi.IsDir() {
 				outputDir := outputFile
 				hostname, _ := os.Hostname()
 				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interfaces(), conf.OutputFormat))
@@ -168,10 +168,10 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 		return errors.New("--output-file is not specified, multi-namespace capture requires --output-file to point to a directory")
 	}
 	fi, err := os.Stat(outputDir)
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if !fi.IsDir() {
+	if err == nil && fi.IsDir() {
 		return fmt.Errorf("%s is not a directory, multi-namespace capture requires --output-file to point to a directory", outputDir)
 	}
 
