@@ -19,6 +19,7 @@ message CaptureQueryTarget {
   oneof target {
     string node = 1;
     capper.Pod pod = 2;
+    string pod_namespace = 3;
   };
 }
 

@@ -94,18 +94,31 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			},
 		})
 	}
-	if captureOpts.K8sNamespace == "" {
-		captureOpts.K8sNamespace = "default"
-	}
-	for _, pod := range captureOpts.K8sPod {
-		targets = append(targets, &capperpb.CaptureQueryTarget{
-			Target: &capperpb.CaptureQueryTarget_Pod{
-				Pod: &capperpb.Pod{
-					Namespace: captureOpts.K8sNamespace,
-					Name:      pod,
+
+	if len(captureOpts.K8sPod) != 0 {
+		ns := captureOpts.K8sNamespace
+		if ns == "" {
+			ns = "default"
+		}
+		for _, pod := range captureOpts.K8sPod {
+			targets = append(targets, &capperpb.CaptureQueryTarget{
+				Target: &capperpb.CaptureQueryTarget_Pod{
+					Pod: &capperpb.Pod{
+						Namespace: ns,
+						Name:      pod,
+					},
 				},
+			})
+		}
+	} else if len(captureOpts.K8sPod) == 0 && captureOpts.K8sNamespace != "" {
+		// Query all pods in the specified namespace if namespace is set, but no pods
+		// specified
+		targets = append(targets, &capperpb.CaptureQueryTarget{
+			Target: &capperpb.CaptureQueryTarget_PodNamespace{
+				PodNamespace: captureOpts.K8sNamespace,
 			},
 		})
+
 	}
 
 	req := &capperpb.CaptureQueryRequest{

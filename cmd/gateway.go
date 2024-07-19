@@ -223,6 +223,20 @@ func (g *gateway) runPeerMetadataUpdater(ctx context.Context, logger *slog.Logge
 	}
 }
 
+func (g *gateway) pods(peer serf.Member, namespace string) []*capperpb.Pod {
+	g.peerPodsMu.Lock()
+	defer g.peerPodsMu.Unlock()
+	peerPodsMap := g.peerPods[peer.Name]
+	var pods []*capperpb.Pod
+	for _, pod := range peerPodsMap {
+		if namespace != "" && pod.GetNamespace() != namespace {
+			continue
+		}
+		pods = append(pods, pod)
+	}
+	return pods
+}
+
 func (g *gateway) podExists(peer serf.Member, pod *capperpb.Pod) bool {
 	g.peerPodsMu.Lock()
 	defer g.peerPodsMu.Unlock()
@@ -259,7 +273,8 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	ctx := stream.Context()
 	peers := g.getPeers()
 	var nodes []serf.Member
-	var pods []*capperpb.Pod
+	var targetPods []*capperpb.Pod
+	var targetPodNamespaces []string
 	for _, target := range req.GetTargets() {
 		switch targetVal := target.GetTarget().(type) {
 		case *capperpb.CaptureQueryTarget_Node:
@@ -274,12 +289,14 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 				}
 			}
 		case *capperpb.CaptureQueryTarget_Pod:
-			pods = append(pods, target.GetPod())
+			targetPods = append(targetPods, target.GetPod())
+		case *capperpb.CaptureQueryTarget_PodNamespace:
+			targetPodNamespaces = append(targetPodNamespaces, target.GetPodNamespace())
 		}
 	}
 
-	// If no nodes or peers were specified then default to all of the nodes
-	if len(nodes) == 0 && len(pods) == 0 {
+	// If no nodes, pods, or pod namespaces were specified then default to all of the nodes
+	if len(nodes) == 0 && len(targetPods) == 0 && len(targetPodNamespaces) == 0 {
 		nodes = peers
 	}
 
@@ -294,8 +311,40 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 			})
 		})
 	}
-	// Make a request to each node, for each pod to be queried.
-	for _, pod := range pods {
+
+	// For each namespace, get the list of pods in that namespace for every peer,
+	// and make a capture request for each
+	for _, podNamespace := range targetPodNamespaces {
+		podNamespace := podNamespace
+		for _, peer := range peers {
+			peer := peer
+			peerPods := g.pods(peer, podNamespace)
+			for _, pod := range peerPods {
+				pod := pod
+				eg.Go(func() error {
+					captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
+					// Override the pod filter to target the pod listed
+					captureReq.K8SPodFilter = pod
+					err := g.captureQueryNode(ctx, peer, captureReq, stream, queryTarget{
+						kind: "pod",
+						pod:  pod,
+					})
+					// The pod may no longer be running when we make the query
+					if status.Code(err) == codes.NotFound {
+						g.log.Warn("pod is no longer running on peer", "peer", peer.Name, "pod", pod)
+						return nil
+					}
+					if err != nil {
+						return fmt.Errorf("error querying peer %s for pod: %s: %w", peer.Name, pod, err)
+					}
+					return nil
+				})
+			}
+		}
+	}
+
+	// Create a capture request for each pod being targeted, attempting to only query the peer running that pod.
+	for _, pod := range targetPods {
 		for _, peer := range peers {
 			pod := pod
 			peer := peer
@@ -310,9 +359,9 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 					kind: "pod",
 					pod:  pod,
 				})
-				// Ignore not found since we're querying every node, and we know the
-				// pod is only going to be running on one of these nodes.
+				// The pod may no longer be running when we make the query
 				if status.Code(err) == codes.NotFound {
+					g.log.Warn("pod is no longer running on peer", "peer", peer.Name, "pod", pod)
 					return nil
 				}
 				if err != nil {
