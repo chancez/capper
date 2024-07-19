@@ -17,7 +17,7 @@ type MultiCapture struct {
 	clock clockwork.Clock
 	conf  Config
 
-	ifaces  []string
+	ifaces  []CaptureInterface
 	handles []*pcap.Handle
 	sources []NamedPacketSource
 }
@@ -25,7 +25,7 @@ type MultiCapture struct {
 func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf Config) (*MultiCapture, error) {
 	clock := clockwork.NewRealClock()
 	var handles []*pcap.Handle
-	var newIfaces []string
+	var captureInterfaces []CaptureInterface
 	var sources []NamedPacketSource
 	// We will get the linkType from the first handle, and use that for the
 	// handler provided.
@@ -35,22 +35,19 @@ func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns stri
 		ifaces = []string{""}
 	}
 	log.Debug("creating handles", "interfaces", ifaces)
-	for _, iface := range ifaces {
+	for _, ifaceName := range ifaces {
 		// TODO: Count packets for the sub-captures.
-		if iface == "" {
-			var err error
-			iface, err = getInterface(netns)
-			if err != nil {
-				return nil, fmt.Errorf("error getting interface: %w", err)
-			}
+		iface, err := getInterface(ifaceName, netns)
+		if err != nil {
+			return nil, fmt.Errorf("error getting interface: %w", err)
 		}
 
 		// TODO: use same linkType on all handles
-		handle, err := NewLiveHandle(iface, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
+		handle, err := NewLiveHandle(iface.Name, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 		if err != nil {
 			return nil, fmt.Errorf("error creating handle: %w", err)
 		}
-		log.Debug("handle created", "interface", iface, "link_type", handle.LinkType())
+		log.Debug("handle created", "interface", iface.Name, "link_type", handle.LinkType())
 
 		// Set the linkType for our PacketHandler to the linkType of the first
 		// handle
@@ -59,11 +56,11 @@ func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns stri
 			log.Debug("using first handles linkType", "link_type", handlerLinkType)
 		}
 
-		newIfaces = append(newIfaces, iface)
+		captureInterfaces = append(captureInterfaces, iface)
 		handles = append(handles, handle)
 
 		sources = append(sources, NamedPacketSource{
-			Name: "iface-" + iface,
+			Name: "iface-" + iface.Name,
 			// We use the original handle LinkType in the PacketSource
 			PacketSource: gopacket.NewPacketSource(handle, handlerLinkType),
 		})
@@ -74,7 +71,7 @@ func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns stri
 		log:     log,
 		clock:   clock,
 		conf:    conf,
-		ifaces:  newIfaces,
+		ifaces:  captureInterfaces,
 		handles: handles,
 		sources: sources,
 	}, nil
@@ -84,7 +81,7 @@ func (c *MultiCapture) LinkType() layers.LinkType {
 	return c.handles[0].LinkType()
 }
 
-func (c *MultiCapture) Interfaces() []string {
+func (c *MultiCapture) Interfaces() []CaptureInterface {
 	return c.ifaces
 }
 

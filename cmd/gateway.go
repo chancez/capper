@@ -405,7 +405,12 @@ func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *c
 		if target.kind == "pod" {
 			identifier = normalizePodFilename(target.pod, resp.GetInterface(), capture.PcapFormat)
 		} else {
-			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), capture.PcapFormat)
+			ifaces := resp.GetInterface()
+			captureIfaces := make([]capture.CaptureInterface, 0, len(ifaces))
+			for _, iface := range ifaces {
+				captureIfaces = append(captureIfaces, capture.CaptureInterface{Name: iface})
+			}
+			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), captureIfaces, capture.PcapFormat)
 		}
 		return stream.Send(&capperpb.CaptureQueryResponse{
 			Data:       resp.GetData(),

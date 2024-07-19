@@ -145,7 +145,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 		}
 
 		captureInterfaces := handle.Interfaces()
-		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0])
+		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0].Name)
 		if err != nil {
 			return err
 		}
@@ -200,7 +200,7 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 			defer f.Close()
 			// TODO: Probably need to replace capture.NewMulti and just handle everything at the caller.
 			captureInterfaces := handle.Interfaces()
-			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0])
+			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0].Name)
 			if err != nil {
 				return err
 			}
@@ -258,7 +258,7 @@ func normalizePodFilename(pod *capperpb.Pod, ifaces []string, outputFormat captu
 	return b.String()
 }
 
-func normalizeFilename(host string, netns string, ifaces []string, outputFormat capture.PcapOutputFormat) string {
+func normalizeFilename(host string, netns string, ifaces []capture.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
 	b.WriteString(host)
@@ -272,7 +272,7 @@ func normalizeFilename(host string, netns string, ifaces []string, outputFormat 
 	if len(ifaces) != 0 {
 		b.WriteString(":ifaces:")
 		for i, iface := range ifaces {
-			b.WriteString(iface)
+			b.WriteString(iface.Name)
 			if i != len(ifaces)-1 {
 				b.WriteString(",")
 			}

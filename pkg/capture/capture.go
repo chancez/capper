@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"runtime"
 	"time"
 
@@ -107,22 +108,49 @@ type Config struct {
 	OutputFormat    PcapOutputFormat
 }
 
-func getInterface(netns string) (string, error) {
-	runGetIface := func() (string, error) {
+type CaptureInterface struct {
+	Name  string
+	Index int
+}
+
+func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
+	runGetIface := func() (CaptureInterface, error) {
 		ifaces, err := pcap.FindAllDevs()
 		if err != nil {
-			return "", fmt.Errorf("error listing network interfaces: %w", err)
+			return CaptureInterface{}, fmt.Errorf("error listing network interfaces: %w", err)
 		}
 		if len(ifaces) == 0 {
-			return "", errors.New("host has no interfaces")
-
+			return CaptureInterface{}, errors.New("host has no interfaces")
 		}
-		return ifaces[0].Name, nil
+		var selected pcap.Interface
+		if ifaceName != "" {
+			for _, iface := range ifaces {
+				if iface.Name == ifaceName {
+					selected = iface
+					break
+				}
+			}
+		} else {
+			selected = ifaces[0]
+		}
+		if selected.Name == "" {
+			return CaptureInterface{}, fmt.Errorf("unable to find interface %s", ifaceName)
+		}
+
+		netIface, err := net.InterfaceByName(selected.Name)
+		if err != nil {
+			return CaptureInterface{}, fmt.Errorf("error getting iface: %w", err)
+		}
+
+		return CaptureInterface{
+			Name:  selected.Name,
+			Index: netIface.Index,
+		}, nil
 	}
 	if runtime.GOOS == "linux" && netns != "" {
 		oldGetIface := runGetIface
-		runGetIface = func() (string, error) {
-			var iface string
+		runGetIface = func() (CaptureInterface, error) {
+			var iface CaptureInterface
 			err := namespaces.RunInNetns(func() error {
 				innerIface, innerErr := oldGetIface()
 				iface = innerIface
@@ -137,7 +165,7 @@ func getInterface(netns string) (string, error) {
 type Capture interface {
 	LinkType() layers.LinkType
 	Start(ctx context.Context, handler PacketHandler) error
-	Interfaces() []string
+	Interfaces() []CaptureInterface
 	Close()
 }
 
@@ -146,22 +174,19 @@ type BasicCapture struct {
 	clock clockwork.Clock
 	conf  Config
 
-	iface  string
+	iface  CaptureInterface
 	handle *pcap.Handle
 }
 
-func NewBasic(ctx context.Context, log *slog.Logger, iface, netns string, conf Config) (*BasicCapture, error) {
+func NewBasic(ctx context.Context, log *slog.Logger, ifaceName, netns string, conf Config) (*BasicCapture, error) {
 	clock := clockwork.NewRealClock()
 
-	if iface == "" {
-		var err error
-		iface, err = getInterface(netns)
-		if err != nil {
-			return nil, fmt.Errorf("error getting interface: %w", err)
-		}
+	iface, err := getInterface(ifaceName, netns)
+	if err != nil {
+		return nil, fmt.Errorf("error getting interface: %w", err)
 	}
 
-	handle, err := NewLiveHandle(iface, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
+	handle, err := NewLiveHandle(iface.Name, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 	if err != nil {
 		return nil, fmt.Errorf("error creating handle: %w", err)
 	}
@@ -179,8 +204,8 @@ func (c *BasicCapture) LinkType() layers.LinkType {
 	return c.handle.LinkType()
 }
 
-func (c *BasicCapture) Interfaces() []string {
-	return []string{c.iface}
+func (c *BasicCapture) Interfaces() []CaptureInterface {
+	return []CaptureInterface{c.iface}
 }
 
 func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
