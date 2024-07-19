@@ -24,6 +24,7 @@ spec:
         app: capper
         component: gateway
     spec:
+      priorityClassName: system-node-critical
       containers:
       - name: capper
         image: quay.io/capper/capper:main

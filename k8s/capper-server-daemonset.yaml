@@ -18,6 +18,7 @@ spec:
         app: capper
         component: server
     spec:
+      priorityClassName: system-node-critical
       dnsPolicy: ClusterFirstWithHostNet
       tolerations:
       - key: node-role.kubernetes.io/master
