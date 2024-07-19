@@ -69,21 +69,23 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		podName = captureOpts.K8sPod[0]
 	}
 
+	var pod *capperpb.Pod
 	if len(captureOpts.K8sPod) != 0 {
 		if captureOpts.K8sNamespace == "" {
 			captureOpts.K8sNamespace = "default"
 		}
-	}
-	req := &capperpb.CaptureRequest{
-		Interface:  captureOpts.Interfaces,
-		Filter:     captureOpts.Filter,
-		Snaplen:    int64(captureOpts.CaptureConfig.Snaplen),
-		NumPackets: captureOpts.CaptureConfig.NumPackets,
-		Duration:   durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
-		K8SPodFilter: &capperpb.Pod{
+		pod = &capperpb.Pod{
 			Namespace: captureOpts.K8sNamespace,
 			Name:      podName,
-		},
+		}
+	}
+	req := &capperpb.CaptureRequest{
+		Interface:         captureOpts.Interfaces,
+		Filter:            captureOpts.Filter,
+		Snaplen:           int64(captureOpts.CaptureConfig.Snaplen),
+		NumPackets:        captureOpts.CaptureConfig.NumPackets,
+		Duration:          durationpb.New(captureOpts.CaptureConfig.CaptureDuration),
+		K8SPodFilter:      pod,
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
 		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
 	}
