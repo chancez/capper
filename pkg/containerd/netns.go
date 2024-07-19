@@ -20,6 +20,17 @@ type Pod struct {
 	Netns     string
 }
 
+func GetPodNameNamespace(ctx context.Context, ctr containerd.Container) (namespace, name string, err error) {
+	labels, err := ctr.Labels(ctx)
+	if err != nil {
+		return "", "", err
+	}
+
+	name = labels["io.kubernetes.pod.name"]
+	namespace = labels["io.kubernetes.pod.namespace"]
+	return
+}
+
 func GetPod(ctx context.Context, client *containerd.Client, podName, namespace string) (*Pod, error) {
 	if podName == "" || namespace == "" {
 		return nil, errors.New("invalid arguments, pod and namespace must be non-empty")
@@ -33,17 +44,14 @@ func GetPod(ctx context.Context, client *containerd.Client, podName, namespace s
 	}
 	var podCtr containerd.Container
 	for _, ctr := range cs {
-		labels, err := ctr.Labels(ctrCtx)
+		foundPod, foundNamespace, err := GetPodNameNamespace(ctrCtx, ctr)
 		if err != nil {
 			return nil, err
 		}
-
-		foundPod, ok1 := labels["io.kubernetes.pod.name"]
-		foundNamespace, ok2 := labels["io.kubernetes.pod.namespace"]
-		if ok1 && ok2 && foundPod == podName && foundNamespace == namespace {
-			podCtr = ctr
+		if foundNamespace != "" && foundPod != "" {
 			break
 		}
+		podCtr = ctr
 	}
 	if podCtr == nil {
 		// no containers matching

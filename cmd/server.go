@@ -177,19 +177,10 @@ func (s *server) updateNodeMetadata(ctx context.Context) error {
 		}
 		newPods := make(map[string]*capperpb.Pod)
 		for _, ctr := range containers {
-			spec, err := ctr.Spec(ctrCtx)
+			pod := &capperpb.Pod{}
+			pod.Name, pod.Namespace, err = containerdutil.GetPodNameNamespace(ctx, ctr)
 			if err != nil {
 				return err
-			}
-			pod := &capperpb.Pod{}
-			// set the pod namespace/name
-			for key, value := range spec.Annotations {
-				switch key {
-				case "io.kubernetes.cri.sandbox-name":
-					pod.Name = value
-				case "io.kubernetes.cri.sandbox-namespace":
-					pod.Namespace = value
-				}
 			}
 			if pod.GetNamespace() != "" && pod.GetName() != "" {
 				newPods[podMapKey(pod)] = pod
