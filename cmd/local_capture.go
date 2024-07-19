@@ -145,7 +145,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 		}
 
 		captureInterfaces := handle.Interfaces()
-		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0].Name)
+		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0])
 		if err != nil {
 			return err
 		}
@@ -200,7 +200,7 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 			defer f.Close()
 			// TODO: Probably need to replace capture.NewMulti and just handle everything at the caller.
 			captureInterfaces := handle.Interfaces()
-			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0].Name)
+			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces[0])
 			if err != nil {
 				return err
 			}
@@ -283,7 +283,7 @@ func normalizeFilename(host string, netns string, ifaces []capture.CaptureInterf
 	return b.String()
 }
 
-func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capture.PcapOutputFormat, iface string) (capture.PacketHandler, error) {
+func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capture.PcapOutputFormat, iface capture.CaptureInterface) (capture.PacketHandler, error) {
 	var writeHandler capture.PacketHandler
 	var err error
 	switch outputFormat {

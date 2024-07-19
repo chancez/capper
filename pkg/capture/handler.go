@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -60,29 +59,15 @@ type PcapNgWriterHandler struct {
 	iface        string
 }
 
-func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, iface string) (*PcapNgWriterHandler, error) {
+func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, iface CaptureInterface) (*PcapNgWriterHandler, error) {
 	intf := pcapgo.NgInterface{
-		Name:     iface,
+		Name:     iface.Name,
+		Index:    iface.Index,
 		LinkType: linkType,
 	}
 	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, pcapgo.DefaultNgWriterOptions)
 	if err != nil {
 		return nil, fmt.Errorf("error creating pcapng writer: %w", err)
-	}
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return nil, fmt.Errorf("error listing interfaces : %w", err)
-	}
-
-	for _, otherIface := range ifaces {
-		if iface == otherIface.Name {
-			continue
-		}
-		pcapngWriter.AddInterface(pcapgo.NgInterface{
-			Name:     otherIface.Name,
-			LinkType: linkType,
-		})
 	}
 
 	return &PcapNgWriterHandler{
