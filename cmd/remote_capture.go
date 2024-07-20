@@ -132,12 +132,9 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 
 	pipeReader, pipeWriter := io.Pipe()
 
-	ifaceCh := make(chan *capperpb.CaptureInterface)
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		sentIface := false
 		defer pipeWriter.Close()
 		for {
 			resp, err := stream.Recv()
@@ -151,16 +148,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 				return fmt.Errorf("error reading from stream: %w", err)
 			}
 
-			data := resp.GetData()
-			if !sentIface {
-				select {
-				case ifaceCh <- resp.GetInterface():
-				case <-ctx.Done():
-					return fmt.Errorf("got cancellation while sending capture interface to writer: %w", ctx.Err())
-				}
-				sentIface = true
-				close(ifaceCh)
-			}
+			data := resp.GetPacket().GetData()
 
 			_, err = pipeWriter.Write(data)
 			if err != nil {
@@ -179,14 +167,8 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 			return err
 		}
 
-		// Must come before using the reader since we send the interfaces before writing to the pipeWriter that the reader is connected to
-		var iface *capperpb.CaptureInterface
-		select {
-		case iface = <-ifaceCh:
-		case <-ctx.Done():
-			return fmt.Errorf("got cancellation while waiting for capture interface: %w", ctx.Err())
-		}
-
+		// Must come before using the reader since we send the interfaces before
+		// writing to the pipeWriter that the reader is connected to
 		linkType := reader.LinkType()
 
 		var handlers []capture.PacketHandler
@@ -206,7 +188,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 				defer f.Close()
 			}
 
-			writeHandler, err := newWriteHandler(w, linkType, uint32(req.GetSnaplen()), req.GetOutputFormat(), iface)
+			writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
 			if err != nil {
 				return err
 			}

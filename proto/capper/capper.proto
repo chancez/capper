@@ -3,6 +3,7 @@ syntax = "proto3";
 package capper;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/chancez/capper/proto/capper";
 
@@ -24,12 +25,35 @@ message CaptureRequest {
 }
 
 message CaptureResponse {
-  bytes data = 1;
-  int64 link_type = 2;
-  CaptureInterface interface = 3;
-  string netns = 4;
+  Packet packet = 1;
 }
 
+message Packet {
+  bytes data = 1;
+  PacketMetadata metadata = 2;
+}
+
+
+message PacketMetadata {
+  CaptureInfo capture_info = 1;
+  bool truncated = 2;
+}
+
+message AncillaryPacketData {
+  int64 link_type = 1;
+  string netns = 2;
+  string iface_name = 3;
+}
+
+message CaptureInfo {
+  google.protobuf.Timestamp timestamp = 1;
+  int64 capture_length = 2;
+  int64 length = 3;
+  int64 interface_index = 4;
+  AncillaryPacketData ancillary_data = 5;
+}
+
+// TODO: What to do with this?
 message CaptureInterface {
   string name = 1;
   uint64 index = 2;

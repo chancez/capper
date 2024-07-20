@@ -32,6 +32,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const nodeMetadataUpdateInterval = 5 * time.Second
@@ -378,17 +379,30 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
 
-	writeHandler, err := newWriteHandler(&buf, linkType, snaplen, outputFormat, iface)
+	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
 	if err != nil {
 		return nil, err
 	}
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
-			Data:      buf.Bytes(),
-			LinkType:  int64(linkType),
-			Netns:     netns,
-			Interface: iface,
+			Packet: &capperpb.Packet{
+				Data: buf.Bytes(),
+				Metadata: &capperpb.PacketMetadata{
+					CaptureInfo: &capperpb.CaptureInfo{
+						Timestamp:      timestamppb.New(p.Metadata().Timestamp),
+						CaptureLength:  int64(p.Metadata().CaptureLength),
+						Length:         int64(p.Metadata().Length),
+						InterfaceIndex: int64(p.Metadata().InterfaceIndex),
+						AncillaryData: &capperpb.AncillaryPacketData{
+							LinkType:  int64(linkType),
+							Netns:     netns,
+							IfaceName: iface.GetName(),
+						},
+					},
+					Truncated: p.Metadata().Truncated,
+				},
+			},
 		}); err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.Canceled || errCode == codes.Unavailable {

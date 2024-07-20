@@ -404,16 +404,16 @@ func (target queryTarget) Target() string {
 
 func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Querier_CaptureQueryServer, target queryTarget) error {
 	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
+		ancillaryData := resp.GetPacket().GetMetadata().GetCaptureInfo().GetAncillaryData()
 		var identifier string
 		if target.kind == "pod" {
-			identifier = normalizePodFilename(target.pod, resp.GetInterface(), req.GetOutputFormat())
+			identifier = normalizePodFilename(target.pod, ancillaryData.GetIfaceName(), req.GetOutputFormat())
 		} else {
-			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), req.GetOutputFormat())
+			identifier = normalizeFilename(target.nodeName, ancillaryData.GetNetns(), ancillaryData.GetIfaceName(), req.GetOutputFormat())
 		}
 		return stream.Send(&capperpb.CaptureQueryResponse{
-			Data:       resp.GetData(),
+			Packet:     resp.GetPacket(),
 			Identifier: identifier,
-			LinkType:   resp.GetLinkType(),
 			NodeName:   peer.Name,
 		})
 	})

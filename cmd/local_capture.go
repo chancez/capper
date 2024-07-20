@@ -134,7 +134,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 			if err == nil && fi.IsDir() {
 				outputDir := outputFile
 				hostname, _ := os.Hostname()
-				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interface(), conf.OutputFormat))
+				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat))
 			}
 			f, err := os.Create(fileName)
 			if err != nil {
@@ -191,7 +191,7 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 		if outputDir != "" {
 			// store each capture into it's own file in the outputDirectory
 			hostname, _ := os.Hostname()
-			fileName := normalizeFilename(hostname, netns, handle.Interface(), conf.OutputFormat)
+			fileName := normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat)
 			f, err := os.Create(filepath.Join(outputDir, fileName))
 			if err != nil {
 				return fmt.Errorf("error opening output: %w", err)
@@ -229,20 +229,20 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 	return capture.NewBasic(ctx, log, iface, netns, conf)
 }
 
-func normalizePodFilename(pod *capperpb.Pod, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
+func normalizePodFilename(pod *capperpb.Pod, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("pod:")
 	b.WriteString(pod.GetNamespace())
 	b.WriteString(":")
 	b.WriteString(pod.GetName())
 	b.WriteString(":iface:")
-	b.WriteString(iface.GetName())
+	b.WriteString(ifaceName)
 	b.WriteString(".")
 	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
 }
 
-func normalizeFilename(host string, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
+func normalizeFilename(host string, netns string, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
 	b.WriteString(host)
@@ -254,7 +254,7 @@ func normalizeFilename(host string, netns string, iface *capperpb.CaptureInterfa
 		}
 	}
 	b.WriteString(":iface:")
-	b.WriteString(iface.GetName())
+	b.WriteString(ifaceName)
 	b.WriteString(".")
 	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()

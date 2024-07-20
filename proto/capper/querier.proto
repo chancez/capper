@@ -24,8 +24,7 @@ message CaptureQueryTarget {
 }
 
 message CaptureQueryResponse {
-  bytes data = 1;
+  capper.Packet packet = 1;
   string identifier = 2;
-  int64 link_type = 3;
-  string node_name = 4;
+  string node_name = 3;
 }

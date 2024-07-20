@@ -271,8 +271,10 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 			packetsTotal++
 
 			identifier := resp.GetIdentifier()
-			data := resp.GetData()
-			linkType := layers.LinkType(resp.GetLinkType())
+			data := resp.GetPacket().GetData()
+
+			ancillaryData := resp.GetPacket().GetMetadata().GetCaptureInfo().GetAncillaryData()
+			linkType := layers.LinkType(ancillaryData.GetLinkType())
 
 			// When writing to a file, we need to know the linkType so we can write the header,
 			// so send it to the merger.
