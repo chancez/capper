@@ -299,10 +299,8 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 					defer pipeReader.Close()
 					writer = pipeWriter
 
-					pcapReader, err := newLazyPcapReader(pipeReader, func(r io.Reader) (PcapReader, error) {
-						return pcapgo.NewReader(r)
-					})
-
+					// TODO: Switch away from a reader
+					pcapReader, err := pcapgo.NewReader(pipeReader)
 					if err != nil {
 						return err
 					}

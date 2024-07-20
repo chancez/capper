@@ -7,17 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"sync"
 
 	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
-	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -130,165 +127,105 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 		log.Info("capture finished", "packets", packetsTotal, "capture_duration", clock.Since(start))
 	}()
 
-	pipeReader, pipeWriter := io.Pipe()
+	streamSource, err := newCaptureStreamPacketSource(stream)
+	if err != nil {
+		return fmt.Errorf("error creating capture stream packet source: %w", err)
+	}
+	linkType := streamSource.LinkType()
 
-	eg, ctx := errgroup.WithContext(ctx)
-
-	eg.Go(func() error {
-		defer pipeWriter.Close()
-		for {
-			resp, err := stream.Recv()
-			if status.Code(err) == codes.Canceled {
-				return nil
-			}
-			if err == io.EOF {
-				return nil
-			}
+	var handlers []capture.PacketHandler
+	if alwaysPrint || outputFile == "" {
+		handlers = append(handlers, capture.PacketPrinterHandler)
+	}
+	if outputFile != "" {
+		var w io.Writer
+		if outputFile == "-" {
+			w = os.Stdout
+		} else {
+			f, err := os.Create(outputFile)
 			if err != nil {
-				return fmt.Errorf("error reading from stream: %w", err)
+				return fmt.Errorf("error opening output: %w", err)
 			}
-
-			data := resp.GetPacket().GetData()
-
-			_, err = pipeWriter.Write(data)
-			if err != nil {
-				return err
-			}
+			w = f
+			defer f.Close()
 		}
-	})
 
-	eg.Go(func() error {
-		// These will be closed when the goroutine returns, resulting in the
-		// PacketsCtx below returning.
-		defer pipeReader.Close()
-
-		reader, err := newPcapReader(pipeReader, req.GetOutputFormat())
+		writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
 		if err != nil {
 			return err
 		}
-
-		// Must come before using the reader since we send the interfaces before
-		// writing to the pipeWriter that the reader is connected to
-		linkType := reader.LinkType()
-
-		var handlers []capture.PacketHandler
-		if alwaysPrint || outputFile == "" {
-			handlers = append(handlers, capture.PacketPrinterHandler)
-		}
-		if outputFile != "" {
-			var w io.Writer
-			if outputFile == "-" {
-				w = os.Stdout
-			} else {
-				f, err := os.Create(outputFile)
-				if err != nil {
-					return fmt.Errorf("error opening output: %w", err)
-				}
-				w = f
-				defer f.Close()
-			}
-
-			writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
-			if err != nil {
-				return err
-			}
-			handlers = append(handlers, writeHandler)
-		}
-		counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
-			packetsTotal++
-			return nil
-		})
-		handlers = append(handlers, counterHandler)
-		handler := capture.ChainPacketHandlers(handlers...)
-
-		packetSource := gopacket.NewPacketSource(reader, linkType)
-		packetsCh := packetSource.PacketsCtx(ctx)
-
-		for packet := range packetsCh {
-			if err := handler.HandlePacket(packet); err != nil {
-				if errors.Is(err, io.EOF) {
-					return nil
-				}
-				return err
-			}
-		}
+		handlers = append(handlers, writeHandler)
+	}
+	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
+		packetsTotal++
 		return nil
 	})
+	handlers = append(handlers, counterHandler)
+	handler := capture.ChainPacketHandlers(handlers...)
 
-	err = eg.Wait()
-	if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-		return nil
+	packetSource := gopacket.NewPacketSource(streamSource, linkType)
+	packetsCh := packetSource.PacketsCtx(ctx)
+
+	for packet := range packetsCh {
+		if err := handler.HandlePacket(packet); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
+
 	return nil
 }
 
-type PcapReader interface {
-	ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error)
-	LinkType() layers.LinkType
+type captureStreamPacketSource struct {
+	stream capperpb.Capper_CaptureClient
+
+	resp     *capperpb.CaptureResponse
+	linkType layers.LinkType
 }
 
-func newPcapReader(r io.Reader, outputFormat capperpb.PcapOutputFormat) (PcapReader, error) {
-	switch outputFormat {
-	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
-		return newLazyPcapReader(r, func(r io.Reader) (PcapReader, error) {
-			return pcapgo.NewNgReader(r, pcapgo.DefaultNgReaderOptions)
-		})
-	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
-		fallthrough
-	default:
-		return newLazyPcapReader(r, func(r io.Reader) (PcapReader, error) {
-			return pcapgo.NewReader(r)
-		})
+func newCaptureStreamPacketSource(stream capperpb.Capper_CaptureClient) (*captureStreamPacketSource, error) {
+	resp, err := stream.Recv()
+	if status.Code(err) == codes.Canceled || err == io.EOF {
+		return nil, fmt.Errorf("stream completed during initialization: %w", err)
 	}
-}
-
-// LazyPcapReader is a pcapgo.Reader but it does not read from the provided
-// io.Reader until ReadPacketData is called.
-type LazyPcapReader struct {
-	reader    io.Reader
-	newReader func(io.Reader) (PcapReader, error)
-
-	once *sync.Once
-	err  error
-
-	pcapReader PcapReader
-}
-
-func newLazyPcapReader(r io.Reader, newReader func(io.Reader) (PcapReader, error)) (*LazyPcapReader, error) {
-	rw := &LazyPcapReader{
-		reader:    r,
-		once:      &sync.Once{},
-		newReader: newReader,
+	if err != nil {
+		return nil, err
 	}
-	return rw, nil
+
+	linkType := layers.LinkType(resp.GetPacket().GetMetadata().GetCaptureInfo().GetAncillaryData().GetLinkType())
+	return &captureStreamPacketSource{stream: stream, resp: resp, linkType: linkType}, nil
 }
 
-func (r *LazyPcapReader) init() {
-	if r.pcapReader == nil {
-		// NewReader is initialized on the first call of one of it's method instead
-		// of at initialization because it begin to read from the underlying io.Reader
-		// and blocks until there's something to read.
-		pcapReader, err := r.newReader(r.reader)
-		if err != nil {
-			r.err = err
-		}
-		r.pcapReader = pcapReader
+func (cs *captureStreamPacketSource) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
+	var err error
+	// use the cached response from initialization, otherwise query the stream for the next response
+	resp := cs.resp
+	if cs.resp == nil {
+		resp, err = cs.stream.Recv()
+	} else {
+		// clear the cached response so we query the stream from now on
+		cs.resp = nil
 	}
-}
-
-func (r *LazyPcapReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
-	r.once.Do(r.init)
-	if r.err != nil {
-		return nil, gopacket.CaptureInfo{}, r.err
+	if status.Code(err) == codes.Canceled || err == io.EOF {
+		return nil, gopacket.CaptureInfo{}, io.EOF
 	}
-	return r.pcapReader.ReadPacketData()
+	if err != nil {
+		return nil, gopacket.CaptureInfo{}, fmt.Errorf("error reading from stream: %w", err)
+	}
+
+	data := resp.GetPacket().GetData()
+	respCI := resp.GetPacket().GetMetadata().GetCaptureInfo()
+	ci := gopacket.CaptureInfo{
+		Timestamp:      respCI.GetTimestamp().AsTime(),
+		CaptureLength:  int(respCI.GetCaptureLength()),
+		Length:         int(respCI.GetLength()),
+		InterfaceIndex: int(respCI.GetInterfaceIndex()),
+	}
+	return data, ci, nil
 }
 
-// // LinkType returns network, as a layers.LinkType.
-func (r *LazyPcapReader) LinkType() layers.LinkType {
-	r.once.Do(r.init)
-	return r.pcapReader.LinkType()
+func (cs *captureStreamPacketSource) LinkType() layers.LinkType {
+	return cs.linkType
 }

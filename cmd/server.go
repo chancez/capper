@@ -4,7 +4,6 @@ Copyright © 2024 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -377,17 +376,11 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
 func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
-	var buf bytes.Buffer
-
-	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
-	if err != nil {
-		return nil, err
-	}
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
 			Packet: &capperpb.Packet{
-				Data: buf.Bytes(),
+				Data: p.Data(),
 				Metadata: &capperpb.PacketMetadata{
 					CaptureInfo: &capperpb.CaptureInfo{
 						Timestamp:      timestamppb.New(p.Metadata().Timestamp),
@@ -410,11 +403,9 @@ func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns stri
 			}
 			return fmt.Errorf("error sending packet: %w", err)
 		}
-		// Reset the buffer after sending the contents
-		buf.Reset()
 		return nil
 	})
-	return capture.ChainPacketHandlers(writeHandler, streamHandler), nil
+	return streamHandler, nil
 }
 
 func InterceptorLogger(l *slog.Logger) logging.Logger {
