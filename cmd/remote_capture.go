@@ -130,14 +130,6 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	}()
 
 	pipeReader, pipeWriter := io.Pipe()
-	// These will be closed when the goroutine returns, resulting in the
-	// PacketsCtx below returning.
-	defer pipeReader.Close()
-
-	reader, err := newLazyPcapReader(pipeReader)
-	if err != nil {
-		return err
-	}
 
 	eg, ctx := errgroup.WithContext(ctx)
 
@@ -165,6 +157,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	})
 
 	eg.Go(func() error {
+		// These will be closed when the goroutine returns, resulting in the
+		// PacketsCtx below returning.
+		defer pipeReader.Close()
+
+		reader, err := newLazyPcapReader(pipeReader)
+		if err != nil {
+			return err
+		}
 		linkType := reader.LinkType()
 
 		var handlers []capture.PacketHandler
