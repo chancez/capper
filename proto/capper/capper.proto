@@ -35,6 +35,12 @@ message CaptureInterface {
   string hostname = 3;
 }
 
+enum PcapOutputFormat {
+  OUTPUT_FORMAT_UNSPECIFIED = 0;
+  OUTPUT_FORMAT_PCAP = 1;
+  OUTPUT_FORMAT_PCAPNG = 2;
+}
+
 message NodeMetadataRequest {
 }
 

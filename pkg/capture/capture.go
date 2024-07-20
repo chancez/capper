@@ -82,24 +82,6 @@ func NewLiveHandle(iface string, netns string, filter string, snaplen int, promi
 	return runCapture()
 }
 
-type PcapOutputFormat int
-
-const (
-	PcapFormat PcapOutputFormat = iota
-	PcapNgFormat
-)
-
-func (f PcapOutputFormat) String() string {
-	switch f {
-	case PcapFormat:
-		return "pcap"
-	case PcapNgFormat:
-		return "pcapng"
-	default:
-		return "pcap"
-	}
-}
-
 type Config struct {
 	Filter          string
 	Snaplen         int
@@ -107,7 +89,7 @@ type Config struct {
 	NumPackets      uint64
 	CaptureDuration time.Duration
 	BufferSize      int
-	OutputFormat    PcapOutputFormat
+	OutputFormat    capperpb.PcapOutputFormat
 }
 
 func getInterface(ifaceName string, netns string) (*capperpb.CaptureInterface, error) {

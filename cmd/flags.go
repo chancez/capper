@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"github.com/chancez/capper/pkg/capture"
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/spf13/pflag"
 )
 
@@ -63,12 +65,14 @@ func getCaptureOpts(ctx context.Context, filter string, fs *pflag.FlagSet) (*cap
 	if err != nil {
 		return nil, err
 	}
-	var format capture.PcapOutputFormat
+	var format capperpb.PcapOutputFormat
 	switch outputFormat {
 	case "pcap":
-		format = capture.PcapFormat
+		format = capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP
 	case "pcapng":
-		format = capture.PcapNgFormat
+		format = capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG
+	default:
+		return nil, fmt.Errorf("invalid output format: %s", outputFormat)
 	}
 	alwaysPrint, err := fs.GetBool("print")
 	if err != nil {

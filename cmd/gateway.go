@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
@@ -403,9 +402,9 @@ func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *c
 	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
 		var identifier string
 		if target.kind == "pod" {
-			identifier = normalizePodFilename(target.pod, resp.GetInterface(), capture.PcapFormat)
+			identifier = normalizePodFilename(target.pod, resp.GetInterface(), capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
 		} else {
-			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), capture.PcapFormat)
+			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
 		}
 		return stream.Send(&capperpb.CaptureQueryResponse{
 			Data:       resp.GetData(),

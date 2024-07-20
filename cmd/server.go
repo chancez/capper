@@ -363,6 +363,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 // bytes to the given Capper_CaptureServer stream.
 func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, ifaces []*capperpb.CaptureInterface, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
+
 	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
 	if err != nil {
 		return nil, err

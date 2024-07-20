@@ -238,7 +238,7 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 	return capture.NewBasic(ctx, log, iface, netns, conf)
 }
 
-func normalizePodFilename(pod *capperpb.Pod, ifaces []*capperpb.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
+func normalizePodFilename(pod *capperpb.Pod, ifaces []*capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("pod:")
 	b.WriteString(pod.GetNamespace())
@@ -254,11 +254,11 @@ func normalizePodFilename(pod *capperpb.Pod, ifaces []*capperpb.CaptureInterface
 		}
 	}
 	b.WriteString(".")
-	b.WriteString(outputFormat.String())
+	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
 }
 
-func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
+func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
 	b.WriteString(host)
@@ -279,17 +279,29 @@ func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInte
 		}
 	}
 	b.WriteString(".")
-	b.WriteString(outputFormat.String())
+	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
 }
 
-func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capture.PcapOutputFormat, ifaces []*capperpb.CaptureInterface) (capture.PacketHandler, error) {
+func outputFormatExtension(outputFormat capperpb.PcapOutputFormat) string {
+	switch outputFormat {
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
+		return "pcapng"
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
+		fallthrough
+	default:
+		return "pcap"
+	}
+
+}
+
+func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat, ifaces []*capperpb.CaptureInterface) (capture.PacketHandler, error) {
 	var writeHandler capture.PacketHandler
 	var err error
 	switch outputFormat {
-	case capture.PcapNgFormat:
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
 		writeHandler, err = capture.NewPcapNgWriterHandler(w, linkType, snaplen, ifaces)
-	case capture.PcapFormat:
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
 		fallthrough
 	default:
 		writeHandler, err = capture.NewPcapWriterHandler(w, linkType, snaplen)
