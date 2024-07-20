@@ -7,6 +7,7 @@ import (
 	"io"
 	"runtime"
 
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
@@ -60,15 +61,15 @@ type PcapNgWriterHandler struct {
 	snaplen      uint32
 }
 
-func ngInterfaceDescription(iface CaptureInterface) string {
+func ngInterfaceDescription(iface *capperpb.CaptureInterface) string {
 	b, _ := json.Marshal(iface)
 	return string(b)
 }
 
-func newNgInterface(iface CaptureInterface, linkType layers.LinkType) pcapgo.NgInterface {
+func newNgInterface(iface *capperpb.CaptureInterface, linkType layers.LinkType) pcapgo.NgInterface {
 	return pcapgo.NgInterface{
 		Name:        iface.Name,
-		Index:       iface.Index,
+		Index:       int(iface.Index),
 		LinkType:    linkType,
 		Description: ngInterfaceDescription(iface),
 	}
@@ -84,7 +85,7 @@ func newNgWriterOptions(arch, os string) pcapgo.NgWriterOptions {
 	}
 }
 
-func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaces []CaptureInterface) (*PcapNgWriterHandler, error) {
+func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaces []*capperpb.CaptureInterface) (*PcapNgWriterHandler, error) {
 	// TODO: This needs to be a parameter for remote captures to avoid using the local arch/OS
 	options := newNgWriterOptions(runtime.GOARCH, runtime.GOOS)
 	iface := ifaces[0]

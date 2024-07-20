@@ -348,7 +348,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, ifaces, stream)
+	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, handle.Interfaces(), stream)
 	if err != nil {
 		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
 	}
@@ -361,7 +361,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, ifaces []string, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, ifaces []*capperpb.CaptureInterface, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
 	writeHandler, err := capture.NewPcapWriterHandler(&buf, linkType, snaplen)
 	if err != nil {

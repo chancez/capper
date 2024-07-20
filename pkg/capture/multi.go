@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
@@ -17,7 +18,7 @@ type MultiCapture struct {
 	clock clockwork.Clock
 	conf  Config
 
-	ifaces  []CaptureInterface
+	ifaces  []*capperpb.CaptureInterface
 	handles []*pcap.Handle
 	sources []NamedPacketSource
 }
@@ -25,7 +26,7 @@ type MultiCapture struct {
 func NewMulti(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf Config) (*MultiCapture, error) {
 	clock := clockwork.NewRealClock()
 	var handles []*pcap.Handle
-	var captureInterfaces []CaptureInterface
+	var captureInterfaces []*capperpb.CaptureInterface
 	var sources []NamedPacketSource
 	// We will get the linkType from the first handle, and use that for the
 	// handler provided.
@@ -81,7 +82,7 @@ func (c *MultiCapture) LinkType() layers.LinkType {
 	return c.handles[0].LinkType()
 }
 
-func (c *MultiCapture) Interfaces() []CaptureInterface {
+func (c *MultiCapture) Interfaces() []*capperpb.CaptureInterface {
 	return c.ifaces
 }
 

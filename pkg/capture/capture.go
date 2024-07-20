@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/chancez/capper/pkg/namespaces"
+	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcap"
@@ -109,23 +110,14 @@ type Config struct {
 	OutputFormat    PcapOutputFormat
 }
 
-type CaptureInterface struct {
-	// Interface name
-	Name string
-	// Interface index
-	Index int
-	// Hostname the interface was captured on
-	Hostname string
-}
-
-func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
-	runGetIface := func() (CaptureInterface, error) {
+func getInterface(ifaceName string, netns string) (*capperpb.CaptureInterface, error) {
+	runGetIface := func() (*capperpb.CaptureInterface, error) {
 		ifaces, err := pcap.FindAllDevs()
 		if err != nil {
-			return CaptureInterface{}, fmt.Errorf("error listing network interfaces: %w", err)
+			return nil, fmt.Errorf("error listing network interfaces: %w", err)
 		}
 		if len(ifaces) == 0 {
-			return CaptureInterface{}, errors.New("host has no interfaces")
+			return nil, errors.New("host has no interfaces")
 		}
 		var selected pcap.Interface
 		if ifaceName != "" {
@@ -139,29 +131,29 @@ func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
 			selected = ifaces[0]
 		}
 		if selected.Name == "" {
-			return CaptureInterface{}, fmt.Errorf("unable to find interface %s", ifaceName)
+			return nil, fmt.Errorf("unable to find interface %s", ifaceName)
 		}
 
 		netIface, err := net.InterfaceByName(selected.Name)
 		if err != nil {
-			return CaptureInterface{}, fmt.Errorf("error getting iface: %w", err)
+			return nil, fmt.Errorf("error getting iface: %w", err)
 		}
 
 		hostname, err := os.Hostname()
 		if err != nil {
-			return CaptureInterface{}, fmt.Errorf("error getting hostname for iface: %w", err)
+			return nil, fmt.Errorf("error getting hostname for iface: %w", err)
 		}
 
-		return CaptureInterface{
+		return &capperpb.CaptureInterface{
 			Name:     selected.Name,
-			Index:    netIface.Index,
+			Index:    uint64(netIface.Index),
 			Hostname: hostname,
 		}, nil
 	}
 	if runtime.GOOS == "linux" && netns != "" {
 		oldGetIface := runGetIface
-		runGetIface = func() (CaptureInterface, error) {
-			var iface CaptureInterface
+		runGetIface = func() (*capperpb.CaptureInterface, error) {
+			var iface *capperpb.CaptureInterface
 			err := namespaces.RunInNetns(func() error {
 				innerIface, innerErr := oldGetIface()
 				iface = innerIface
@@ -176,7 +168,7 @@ func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
 type Capture interface {
 	LinkType() layers.LinkType
 	Start(ctx context.Context, handler PacketHandler) error
-	Interfaces() []CaptureInterface
+	Interfaces() []*capperpb.CaptureInterface
 	Close()
 }
 
@@ -185,7 +177,7 @@ type BasicCapture struct {
 	clock clockwork.Clock
 	conf  Config
 
-	iface  CaptureInterface
+	iface  *capperpb.CaptureInterface
 	handle *pcap.Handle
 }
 
@@ -215,8 +207,8 @@ func (c *BasicCapture) LinkType() layers.LinkType {
 	return c.handle.LinkType()
 }
 
-func (c *BasicCapture) Interfaces() []CaptureInterface {
-	return []CaptureInterface{c.iface}
+func (c *BasicCapture) Interfaces() []*capperpb.CaptureInterface {
+	return []*capperpb.CaptureInterface{c.iface}
 }
 
 func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {

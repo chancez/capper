@@ -238,7 +238,7 @@ func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns st
 	return capture.NewBasic(ctx, log, iface, netns, conf)
 }
 
-func normalizePodFilename(pod *capperpb.Pod, ifaces []string, outputFormat capture.PcapOutputFormat) string {
+func normalizePodFilename(pod *capperpb.Pod, ifaces []*capperpb.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("pod:")
 	b.WriteString(pod.GetNamespace())
@@ -247,7 +247,7 @@ func normalizePodFilename(pod *capperpb.Pod, ifaces []string, outputFormat captu
 	if len(ifaces) != 0 {
 		b.WriteString(":ifaces:")
 		for i, iface := range ifaces {
-			b.WriteString(iface)
+			b.WriteString(iface.GetName())
 			if i != len(ifaces)-1 {
 				b.WriteString(",")
 			}
@@ -258,7 +258,7 @@ func normalizePodFilename(pod *capperpb.Pod, ifaces []string, outputFormat captu
 	return b.String()
 }
 
-func normalizeFilename(host string, netns string, ifaces []capture.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
+func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInterface, outputFormat capture.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
 	b.WriteString(host)
@@ -272,7 +272,7 @@ func normalizeFilename(host string, netns string, ifaces []capture.CaptureInterf
 	if len(ifaces) != 0 {
 		b.WriteString(":ifaces:")
 		for i, iface := range ifaces {
-			b.WriteString(iface.Name)
+			b.WriteString(iface.GetName())
 			if i != len(ifaces)-1 {
 				b.WriteString(",")
 			}
@@ -283,7 +283,7 @@ func normalizeFilename(host string, netns string, ifaces []capture.CaptureInterf
 	return b.String()
 }
 
-func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capture.PcapOutputFormat, ifaces []capture.CaptureInterface) (capture.PacketHandler, error) {
+func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capture.PcapOutputFormat, ifaces []*capperpb.CaptureInterface) (capture.PacketHandler, error) {
 	var writeHandler capture.PacketHandler
 	var err error
 	switch outputFormat {

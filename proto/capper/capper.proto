@@ -25,8 +25,14 @@ message CaptureRequest {
 message CaptureResponse {
   bytes data = 1;
   int64 link_type = 2;
-  repeated string interface = 3;
+  repeated CaptureInterface interface = 3;
   string netns = 4;
+}
+
+message CaptureInterface {
+  string name = 1;
+  uint64 index = 2;
+  string hostname = 3;
 }
 
 message NodeMetadataRequest {
