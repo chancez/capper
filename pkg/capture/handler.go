@@ -56,23 +56,39 @@ func (pwh *PcapWriterHandler) Flush() error {
 type PcapNgWriterHandler struct {
 	pcapngWriter *pcapgo.NgWriter
 	snaplen      uint32
-	iface        string
+	ifaceToID    map[CaptureInterface]int
 }
 
-func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, iface CaptureInterface) (*PcapNgWriterHandler, error) {
+func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaces []CaptureInterface) (*PcapNgWriterHandler, error) {
 	intf := pcapgo.NgInterface{
-		Name:     iface.Name,
-		Index:    iface.Index,
+		Name:     ifaces[0].Name,
+		Index:    ifaces[0].Index,
 		LinkType: linkType,
 	}
 	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, pcapgo.DefaultNgWriterOptions)
 	if err != nil {
 		return nil, fmt.Errorf("error creating pcapng writer: %w", err)
 	}
+	ifaceToID := make(map[CaptureInterface]int)
+	ifaceToID[ifaces[0]] = 0
+
+	for _, iface := range ifaces[1:] {
+		intf := pcapgo.NgInterface{
+			Name:     iface.Name,
+			Index:    iface.Index,
+			LinkType: linkType,
+		}
+		id, err := pcapngWriter.AddInterface(intf)
+		if err != nil {
+			return nil, err
+		}
+		ifaceToID[iface] = id
+	}
 
 	return &PcapNgWriterHandler{
 		pcapngWriter: pcapngWriter,
 		snaplen:      snaplen,
+		ifaceToID:    ifaceToID,
 	}, nil
 }
 
