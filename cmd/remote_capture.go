@@ -88,6 +88,7 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		K8SPodFilter:      pod,
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
 		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
+		OutputFormat:      captureOpts.CaptureConfig.OutputFormat,
 	}
 	return remoteCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
@@ -131,9 +132,12 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 
 	pipeReader, pipeWriter := io.Pipe()
 
+	ifacesCh := make(chan []*capperpb.CaptureInterface)
+
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
+		sentIfaces := false
 		defer pipeWriter.Close()
 		for {
 			resp, err := stream.Recv()
@@ -148,6 +152,15 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 			}
 
 			data := resp.GetData()
+			if !sentIfaces {
+				select {
+				case ifacesCh <- resp.GetInterface():
+				case <-ctx.Done():
+					return fmt.Errorf("got cancellation while sending capture interfaces to writer: %w", ctx.Err())
+				}
+				sentIfaces = true
+				close(ifacesCh)
+			}
 
 			_, err = pipeWriter.Write(data)
 			if err != nil {
@@ -161,10 +174,19 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 		// PacketsCtx below returning.
 		defer pipeReader.Close()
 
-		reader, err := newLazyPcapReader(pipeReader)
+		reader, err := newPcapReader(pipeReader, req.GetOutputFormat())
 		if err != nil {
 			return err
 		}
+
+		// Must come before using the reader since we send the interfaces before writing to the pipeWriter that the reader is connected to
+		var ifaces []*capperpb.CaptureInterface
+		select {
+		case ifaces = <-ifacesCh:
+		case <-ctx.Done():
+			return fmt.Errorf("got cancellation while waiting for capture interfaces: %w", ctx.Err())
+		}
+
 		linkType := reader.LinkType()
 
 		var handlers []capture.PacketHandler
@@ -183,7 +205,8 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 				w = f
 				defer f.Close()
 			}
-			writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
+
+			writeHandler, err := newWriteHandler(w, linkType, uint32(req.GetSnaplen()), req.GetOutputFormat(), ifaces)
 			if err != nil {
 				return err
 			}
@@ -220,21 +243,43 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	return nil
 }
 
+type PcapReader interface {
+	ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error)
+	LinkType() layers.LinkType
+}
+
+func newPcapReader(r io.Reader, outputFormat capperpb.PcapOutputFormat) (PcapReader, error) {
+	switch outputFormat {
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
+		return newLazyPcapReader(r, func(r io.Reader) (PcapReader, error) {
+			return pcapgo.NewNgReader(r, pcapgo.DefaultNgReaderOptions)
+		})
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
+		fallthrough
+	default:
+		return newLazyPcapReader(r, func(r io.Reader) (PcapReader, error) {
+			return pcapgo.NewReader(r)
+		})
+	}
+}
+
 // LazyPcapReader is a pcapgo.Reader but it does not read from the provided
 // io.Reader until ReadPacketData is called.
 type LazyPcapReader struct {
-	reader io.Reader
+	reader    io.Reader
+	newReader func(io.Reader) (PcapReader, error)
 
 	once *sync.Once
 	err  error
 
-	pcapReader *pcapgo.Reader
+	pcapReader PcapReader
 }
 
-func newLazyPcapReader(r io.Reader) (*LazyPcapReader, error) {
+func newLazyPcapReader(r io.Reader, newReader func(io.Reader) (PcapReader, error)) (*LazyPcapReader, error) {
 	rw := &LazyPcapReader{
-		reader: r,
-		once:   &sync.Once{},
+		reader:    r,
+		once:      &sync.Once{},
+		newReader: newReader,
 	}
 	return rw, nil
 }
@@ -244,7 +289,7 @@ func (r *LazyPcapReader) init() {
 		// NewReader is initialized on the first call of one of it's method instead
 		// of at initialization because it begin to read from the underlying io.Reader
 		// and blocks until there's something to read.
-		pcapReader, err := pcapgo.NewReader(r.reader)
+		pcapReader, err := r.newReader(r.reader)
 		if err != nil {
 			r.err = err
 		}
@@ -264,10 +309,4 @@ func (r *LazyPcapReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) 
 func (r *LazyPcapReader) LinkType() layers.LinkType {
 	r.once.Do(r.init)
 	return r.pcapReader.LinkType()
-}
-
-// Snaplen returns the snapshot length of the capture file.
-func (r *LazyPcapReader) Snaplen() uint32 {
-	r.once.Do(r.init)
-	return r.pcapReader.Snaplen()
 }

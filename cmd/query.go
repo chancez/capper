@@ -14,6 +14,7 @@ import (
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -296,7 +297,10 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 					defer pipeReader.Close()
 					writer = pipeWriter
 
-					pcapReader, err := newLazyPcapReader(pipeReader)
+					pcapReader, err := newLazyPcapReader(pipeReader, func(r io.Reader) (PcapReader, error) {
+						return pcapgo.NewReader(r)
+					})
+
 					if err != nil {
 						return err
 					}
