@@ -252,10 +252,10 @@ func (r *LazyPcapReader) init() {
 	}
 }
 
-func (r *LazyPcapReader) ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error) {
+func (r *LazyPcapReader) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
 	r.once.Do(r.init)
 	if r.err != nil {
-		return nil, gopacket.CaptureInfo{}, err
+		return nil, gopacket.CaptureInfo{}, r.err
 	}
 	return r.pcapReader.ReadPacketData()
 }
