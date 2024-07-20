@@ -269,6 +269,10 @@ func (g *gateway) updatePeerMetadata(peer serf.Member, update *capperpb.NodeMeta
 }
 
 func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperpb.Querier_CaptureQueryServer) error {
+	if req.GetCaptureRequest().GetOutputFormat() == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
+		return status.Error(codes.InvalidArgument, "pcapng format is unsupported by query API")
+	}
+
 	ctx := stream.Context()
 	peers := g.getPeers()
 	var nodes []serf.Member
@@ -402,9 +406,9 @@ func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *c
 	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
 		var identifier string
 		if target.kind == "pod" {
-			identifier = normalizePodFilename(target.pod, resp.GetInterface(), capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
+			identifier = normalizePodFilename(target.pod, resp.GetInterface(), req.GetOutputFormat())
 		} else {
-			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
+			identifier = normalizeFilename(target.nodeName, resp.GetNetns(), resp.GetInterface(), req.GetOutputFormat())
 		}
 		return stream.Send(&capperpb.CaptureQueryResponse{
 			Data:       resp.GetData(),

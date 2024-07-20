@@ -20,6 +20,7 @@ message CaptureRequest {
   Pod k8s_pod_filter = 7;
   bool no_promiscuous_mode = 8;
   int64 buffer_size = 9;
+  PcapOutputFormat output_format = 10;
 }
 
 message CaptureResponse {
