@@ -1,9 +1,11 @@
 package capture
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -56,39 +58,53 @@ func (pwh *PcapWriterHandler) Flush() error {
 type PcapNgWriterHandler struct {
 	pcapngWriter *pcapgo.NgWriter
 	snaplen      uint32
-	ifaceToID    map[CaptureInterface]int
+}
+
+func ngInterfaceDescription(iface CaptureInterface) string {
+	b, _ := json.Marshal(iface)
+	return string(b)
+}
+
+func newNgInterface(iface CaptureInterface, linkType layers.LinkType) pcapgo.NgInterface {
+	return pcapgo.NgInterface{
+		Name:        iface.Name,
+		Index:       iface.Index,
+		LinkType:    linkType,
+		Description: ngInterfaceDescription(iface),
+	}
+}
+
+func newNgWriterOptions(arch, os string) pcapgo.NgWriterOptions {
+	return pcapgo.NgWriterOptions{
+		SectionInfo: pcapgo.NgSectionInfo{
+			Hardware:    arch,
+			OS:          os,
+			Application: "capper",
+		},
+	}
 }
 
 func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaces []CaptureInterface) (*PcapNgWriterHandler, error) {
-	intf := pcapgo.NgInterface{
-		Name:     ifaces[0].Name,
-		Index:    ifaces[0].Index,
-		LinkType: linkType,
-	}
-	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, pcapgo.DefaultNgWriterOptions)
+	// TODO: This needs to be a parameter for remote captures to avoid using the local arch/OS
+	options := newNgWriterOptions(runtime.GOARCH, runtime.GOOS)
+	iface := ifaces[0]
+	intf := newNgInterface(iface, linkType)
+	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, options)
 	if err != nil {
 		return nil, fmt.Errorf("error creating pcapng writer: %w", err)
 	}
-	ifaceToID := make(map[CaptureInterface]int)
-	ifaceToID[ifaces[0]] = 0
 
 	for _, iface := range ifaces[1:] {
-		intf := pcapgo.NgInterface{
-			Name:     iface.Name,
-			Index:    iface.Index,
-			LinkType: linkType,
-		}
-		id, err := pcapngWriter.AddInterface(intf)
+		intf := newNgInterface(iface, linkType)
+		_, err := pcapngWriter.AddInterface(intf)
 		if err != nil {
 			return nil, err
 		}
-		ifaceToID[iface] = id
 	}
 
 	return &PcapNgWriterHandler{
 		pcapngWriter: pcapngWriter,
 		snaplen:      snaplen,
-		ifaceToID:    ifaceToID,
 	}, nil
 }
 

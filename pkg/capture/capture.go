@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"runtime"
 	"time"
 
@@ -109,8 +110,12 @@ type Config struct {
 }
 
 type CaptureInterface struct {
-	Name  string
+	// Interface name
+	Name string
+	// Interface index
 	Index int
+	// Hostname the interface was captured on
+	Hostname string
 }
 
 func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
@@ -142,9 +147,15 @@ func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
 			return CaptureInterface{}, fmt.Errorf("error getting iface: %w", err)
 		}
 
+		hostname, err := os.Hostname()
+		if err != nil {
+			return CaptureInterface{}, fmt.Errorf("error getting hostname for iface: %w", err)
+		}
+
 		return CaptureInterface{
-			Name:  selected.Name,
-			Index: netIface.Index,
+			Name:     selected.Name,
+			Index:    netIface.Index,
+			Hostname: hostname,
 		}, nil
 	}
 	if runtime.GOOS == "linux" && netns != "" {
