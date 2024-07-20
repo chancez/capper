@@ -342,30 +342,43 @@ func (s *server) NodeMetadata(req *capperpb.NodeMetadataRequest, stream capperpb
 }
 
 func (s *server) capture(ctx context.Context, ifaces []string, netns string, conf capture.Config, stream capperpb.Capper_CaptureServer) error {
-	handle, err := capture.NewMulti(ctx, s.log, ifaces, netns, conf)
-	if err != nil {
-		return err
+	eg, ctx := errgroup.WithContext(ctx)
+	if len(ifaces) == 0 {
+		ifaces = []string{""}
 	}
-	defer handle.Close()
-	linkType := handle.LinkType()
+	for _, iface := range ifaces {
+		iface := iface
+		eg.Go(func() error {
+			handle, err := capture.NewBasic(ctx, s.log, iface, netns, conf)
+			if err != nil {
+				return fmt.Errorf("error creating packet capture: %w", err)
+			}
+			defer handle.Close()
+			linkType := handle.LinkType()
 
-	streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, handle.Interfaces(), conf.OutputFormat, stream)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
+			streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, handle.Interface(), conf.OutputFormat, stream)
+			if err != nil {
+				return fmt.Errorf("failed to create stream packet handler: %w", err)
+			}
+			err = handle.Start(ctx, streamHandler)
+			if err != nil {
+				return fmt.Errorf("error while capturing packets: %w", err)
+			}
+			return nil
+		})
 	}
-	err = handle.Start(ctx, streamHandler)
-	if err != nil {
-		return status.Errorf(codes.Internal, "error occurred while capturing packets: %s", err)
+	if err := eg.Wait(); err != nil {
+		return status.Error(codes.Internal, err.Error())
 	}
 	return nil
 }
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, ifaces []*capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	var buf bytes.Buffer
 
-	writeHandler, err := newWriteHandler(&buf, linkType, snaplen, outputFormat, ifaces)
+	writeHandler, err := newWriteHandler(&buf, linkType, snaplen, outputFormat, iface)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +388,7 @@ func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns stri
 			Data:      buf.Bytes(),
 			LinkType:  int64(linkType),
 			Netns:     netns,
-			Interface: ifaces,
+			Interface: iface,
 		}); err != nil {
 			errCode := status.Code(err)
 			if errCode == codes.Canceled || errCode == codes.Unavailable {

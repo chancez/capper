@@ -150,7 +150,7 @@ func getInterface(ifaceName string, netns string) (*capperpb.CaptureInterface, e
 type Capture interface {
 	LinkType() layers.LinkType
 	Start(ctx context.Context, handler PacketHandler) error
-	Interfaces() []*capperpb.CaptureInterface
+	Interface() *capperpb.CaptureInterface
 	Close()
 }
 
@@ -189,8 +189,8 @@ func (c *BasicCapture) LinkType() layers.LinkType {
 	return c.handle.LinkType()
 }
 
-func (c *BasicCapture) Interfaces() []*capperpb.CaptureInterface {
-	return []*capperpb.CaptureInterface{c.iface}
+func (c *BasicCapture) Interface() *capperpb.CaptureInterface {
+	return c.iface
 }
 
 func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {

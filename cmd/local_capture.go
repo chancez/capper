@@ -134,7 +134,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 			if err == nil && fi.IsDir() {
 				outputDir := outputFile
 				hostname, _ := os.Hostname()
-				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interfaces(), conf.OutputFormat))
+				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interface(), conf.OutputFormat))
 			}
 			f, err := os.Create(fileName)
 			if err != nil {
@@ -144,8 +144,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 			defer f.Close()
 		}
 
-		captureInterfaces := handle.Interfaces()
-		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces)
+		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
 		if err != nil {
 			return err
 		}
@@ -192,15 +191,13 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 		if outputDir != "" {
 			// store each capture into it's own file in the outputDirectory
 			hostname, _ := os.Hostname()
-			fileName := normalizeFilename(hostname, netns, handle.Interfaces(), conf.OutputFormat)
+			fileName := normalizeFilename(hostname, netns, handle.Interface(), conf.OutputFormat)
 			f, err := os.Create(filepath.Join(outputDir, fileName))
 			if err != nil {
 				return fmt.Errorf("error opening output: %w", err)
 			}
 			defer f.Close()
-			// TODO: Probably need to replace capture.NewMulti and just handle everything at the caller.
-			captureInterfaces := handle.Interfaces()
-			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, captureInterfaces)
+			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
 			if err != nil {
 				return err
 			}
@@ -227,38 +224,25 @@ func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []
 }
 
 func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf capture.Config) (capture.Capture, error) {
-	if len(ifaces) >= 2 {
-		return capture.NewMulti(ctx, log, ifaces, netns, conf)
-	}
-
-	var iface string
-	if len(ifaces) == 1 {
-		iface = ifaces[0]
-	}
+	// TODO add multi-capture logic back
+	iface := ifaces[0]
 	return capture.NewBasic(ctx, log, iface, netns, conf)
 }
 
-func normalizePodFilename(pod *capperpb.Pod, ifaces []*capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
+func normalizePodFilename(pod *capperpb.Pod, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("pod:")
 	b.WriteString(pod.GetNamespace())
 	b.WriteString(":")
 	b.WriteString(pod.GetName())
-	if len(ifaces) != 0 {
-		b.WriteString(":ifaces:")
-		for i, iface := range ifaces {
-			b.WriteString(iface.GetName())
-			if i != len(ifaces)-1 {
-				b.WriteString(",")
-			}
-		}
-	}
+	b.WriteString(":iface:")
+	b.WriteString(iface.GetName())
 	b.WriteString(".")
 	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
 }
 
-func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
+func normalizeFilename(host string, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
 	b.WriteString(host)
@@ -269,15 +253,8 @@ func normalizeFilename(host string, netns string, ifaces []*capperpb.CaptureInte
 			b.WriteString(netnsStr)
 		}
 	}
-	if len(ifaces) != 0 {
-		b.WriteString(":ifaces:")
-		for i, iface := range ifaces {
-			b.WriteString(iface.GetName())
-			if i != len(ifaces)-1 {
-				b.WriteString(",")
-			}
-		}
-	}
+	b.WriteString(":iface:")
+	b.WriteString(iface.GetName())
 	b.WriteString(".")
 	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
@@ -295,12 +272,12 @@ func outputFormatExtension(outputFormat capperpb.PcapOutputFormat) string {
 
 }
 
-func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat, ifaces []*capperpb.CaptureInterface) (capture.PacketHandler, error) {
+func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat, iface *capperpb.CaptureInterface) (capture.PacketHandler, error) {
 	var writeHandler capture.PacketHandler
 	var err error
 	switch outputFormat {
 	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
-		writeHandler, err = capture.NewPcapNgWriterHandler(w, linkType, snaplen, ifaces)
+		writeHandler, err = capture.NewPcapNgWriterHandler(w, linkType, snaplen, iface)
 	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
 		fallthrough
 	default:

@@ -85,22 +85,13 @@ func newNgWriterOptions(arch, os string) pcapgo.NgWriterOptions {
 	}
 }
 
-func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaces []*capperpb.CaptureInterface) (*PcapNgWriterHandler, error) {
+func NewPcapNgWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, iface *capperpb.CaptureInterface) (*PcapNgWriterHandler, error) {
 	// TODO: This needs to be a parameter for remote captures to avoid using the local arch/OS
 	options := newNgWriterOptions(runtime.GOARCH, runtime.GOOS)
-	iface := ifaces[0]
 	intf := newNgInterface(iface, linkType)
 	pcapngWriter, err := pcapgo.NewNgWriterInterface(w, intf, options)
 	if err != nil {
 		return nil, fmt.Errorf("error creating pcapng writer: %w", err)
-	}
-
-	for _, iface := range ifaces[1:] {
-		intf := newNgInterface(iface, linkType)
-		_, err := pcapngWriter.AddInterface(intf)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return &PcapNgWriterHandler{

@@ -132,12 +132,12 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 
 	pipeReader, pipeWriter := io.Pipe()
 
-	ifacesCh := make(chan []*capperpb.CaptureInterface)
+	ifaceCh := make(chan *capperpb.CaptureInterface)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
-		sentIfaces := false
+		sentIface := false
 		defer pipeWriter.Close()
 		for {
 			resp, err := stream.Recv()
@@ -152,14 +152,14 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 			}
 
 			data := resp.GetData()
-			if !sentIfaces {
+			if !sentIface {
 				select {
-				case ifacesCh <- resp.GetInterface():
+				case ifaceCh <- resp.GetInterface():
 				case <-ctx.Done():
-					return fmt.Errorf("got cancellation while sending capture interfaces to writer: %w", ctx.Err())
+					return fmt.Errorf("got cancellation while sending capture interface to writer: %w", ctx.Err())
 				}
-				sentIfaces = true
-				close(ifacesCh)
+				sentIface = true
+				close(ifaceCh)
 			}
 
 			_, err = pipeWriter.Write(data)
@@ -180,11 +180,11 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 		}
 
 		// Must come before using the reader since we send the interfaces before writing to the pipeWriter that the reader is connected to
-		var ifaces []*capperpb.CaptureInterface
+		var iface *capperpb.CaptureInterface
 		select {
-		case ifaces = <-ifacesCh:
+		case iface = <-ifaceCh:
 		case <-ctx.Done():
-			return fmt.Errorf("got cancellation while waiting for capture interfaces: %w", ctx.Err())
+			return fmt.Errorf("got cancellation while waiting for capture interface: %w", ctx.Err())
 		}
 
 		linkType := reader.LinkType()
@@ -206,7 +206,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 				defer f.Close()
 			}
 
-			writeHandler, err := newWriteHandler(w, linkType, uint32(req.GetSnaplen()), req.GetOutputFormat(), ifaces)
+			writeHandler, err := newWriteHandler(w, linkType, uint32(req.GetSnaplen()), req.GetOutputFormat(), iface)
 			if err != nil {
 				return err
 			}

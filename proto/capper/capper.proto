@@ -26,7 +26,7 @@ message CaptureRequest {
 message CaptureResponse {
   bytes data = 1;
   int64 link_type = 2;
-  repeated CaptureInterface interface = 3;
+  CaptureInterface interface = 3;
   string netns = 4;
 }
 
