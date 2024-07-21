@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -16,7 +15,6 @@ import (
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/spf13/cobra"
-	"golang.org/x/sync/errgroup"
 )
 
 var localCaptureCmd = &cobra.Command{
@@ -93,64 +91,45 @@ func runLocalCapture(cmd *cobra.Command, args []string) error {
 		netNamespaces = append(netNamespaces, pod.Netns)
 	}
 
-	if len(netNamespaces) > 1 {
-		return localCaptureMultiNamespace(ctx, captureOpts.Logger, captureOpts.Interfaces, netNamespaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
-	}
-
-	var netns string
-	if len(netNamespaces) == 1 {
-		netns = netNamespaces[0]
-	}
-	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, netns, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	return localCapture(ctx, captureOpts.Logger, captureOpts.Interfaces, netNamespaces, captureOpts.CaptureConfig, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
 // localCapture runs a packet capture and stores the output to the specified file or
 // logs the packets to stdout with the configured logger if outputFile is
 // empty.
 // If alwaysPrint is true; it prints regardless whether outputFile is empty.
-func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf capture.Config, outputFile string, alwaysPrint bool) error {
-	handle, err := newCapture(ctx, log, ifaces, netns, conf)
+func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netNamespaces []string, conf capture.Config, outputPath string, alwaysPrint bool) error {
+	var isDir bool
+	if outputPath != "" {
+		fi, err := os.Stat(outputPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil && fi.IsDir() {
+			isDir = true
+		}
+	}
+	printPackets := outputPath == "" || alwaysPrint
+
+	iface := ""
+	if len(ifaces) != 0 {
+		iface = ifaces[0]
+	}
+
+	netns := ""
+	if len(netNamespaces) != 0 {
+		netns = netNamespaces[0]
+	}
+
+	handle, err := capture.NewBasic(ctx, log, iface, netns, conf)
 	if err != nil {
 		return err
 	}
 	defer handle.Close()
 	linkType := handle.LinkType()
-	var handlers []capture.PacketHandler
-	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, capture.PacketPrinterHandler)
-	}
-	if outputFile != "" {
-		var w io.Writer
-		if outputFile == "-" {
-			w = os.Stdout
-		} else {
-			fi, err := os.Stat(outputFile)
-			if err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
 
-			fileName := outputFile
-			// if the output is a directory, generate a filename and store it in that directory
-			if err == nil && fi.IsDir() {
-				outputDir := outputFile
-				hostname, _ := os.Hostname()
-				fileName = filepath.Join(outputDir, normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat))
-			}
-			f, err := os.Create(fileName)
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
-			}
-			w = f
-			defer f.Close()
-		}
-
-		writeHandler, err := newWriteHandler(w, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
-		if err != nil {
-			return err
-		}
-		handlers = append(handlers, writeHandler)
-	}
-	handler := capture.ChainPacketHandlers(handlers...)
+	handler := newCommonHandler(linkType, uint32(conf.Snaplen), printPackets, outputPath, isDir)
+	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)
 	if err != nil {
@@ -159,75 +138,69 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns 
 	return nil
 }
 
-func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []string, netNamespaces []string, conf capture.Config, outputDir string, alwaysPrint bool) error {
-	if len(netNamespaces) < 2 {
-		return errors.New("localCaptureMultiNamespace requires at least 2 namespaces")
-	}
-	if outputDir == "" {
-		return errors.New("--output-file is not specified, multi-namespace capture requires --output-file to point to a directory")
-	}
-	fi, err := os.Stat(outputDir)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err == nil && fi.IsDir() {
-		return fmt.Errorf("%s is not a directory, multi-namespace capture requires --output-file to point to a directory", outputDir)
-	}
+// func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []string, netNamespaces []string, conf capture.Config, outputDir string, alwaysPrint bool) error {
+// 	if len(netNamespaces) < 2 {
+// 		return errors.New("localCaptureMultiNamespace requires at least 2 namespaces")
+// 	}
+// 	if outputDir == "" {
+// 		return errors.New("--output-file is not specified, multi-namespace capture requires --output-file to point to a directory")
+// 	}
+// 	fi, err := os.Stat(outputDir)
+// 	if err != nil && !errors.Is(err, os.ErrNotExist) {
+// 		return err
+// 	}
+// 	if err == nil && fi.IsDir() {
+// 		return fmt.Errorf("%s is not a directory, multi-namespace capture requires --output-file to point to a directory", outputDir)
+// 	}
 
-	var eg errgroup.Group
-	for _, netns := range netNamespaces {
-		// Create a capture per netns
-		handle, err := newCapture(ctx, log, ifaces, netns, conf)
-		if err != nil {
-			return err
-		}
-		defer handle.Close()
-		linkType := handle.LinkType()
+// 	var eg errgroup.Group
+// 	for _, netns := range netNamespaces {
+// 		// Create a capture per netns
+// 		handle, err := newCapture(ctx, log, ifaces, netns, conf)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		defer handle.Close()
+// 		linkType := handle.LinkType()
 
-		var handlers []capture.PacketHandler
-		if alwaysPrint || outputDir == "" {
-			handlers = append(handlers, capture.PacketPrinterHandler)
-		}
-		if outputDir != "" {
-			// store each capture into it's own file in the outputDirectory
-			hostname, _ := os.Hostname()
-			fileName := normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat)
-			f, err := os.Create(filepath.Join(outputDir, fileName))
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
-			}
-			defer f.Close()
-			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
-			if err != nil {
-				return err
-			}
-			handlers = append(handlers, writeHandler)
-		}
+// 		var handlers []capture.PacketHandler
+// 		if alwaysPrint || outputDir == "" {
+// 			handlers = append(handlers, capture.PacketPrinterHandler)
+// 		}
+// 		if outputDir != "" {
+// 			// store each capture into it's own file in the outputDirectory
+// 			hostname, _ := os.Hostname()
+// 			fileName := normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat)
+// 			f, err := os.Create(filepath.Join(outputDir, fileName))
+// 			if err != nil {
+// 				return fmt.Errorf("error opening output: %w", err)
+// 			}
+// 			defer f.Close()
+// 			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
+// 			if err != nil {
+// 				return err
+// 			}
+// 			handlers = append(handlers, writeHandler)
+// 		}
 
-		eg.Go(func() error {
-			err = handle.Start(ctx, capture.ChainPacketHandlers(handlers...))
-			if err != nil {
-				return fmt.Errorf("error occurred while capturing packets: %w", err)
-			}
-			return nil
-		})
-	}
+// 		eg.Go(func() error {
+// 			err = handle.Start(ctx, capture.ChainPacketHandlers(handlers...))
+// 			if err != nil {
+// 				return fmt.Errorf("error occurred while capturing packets: %w", err)
+// 			}
+// 			return nil
+// 		})
+// 	}
 
-	err = eg.Wait()
-	if errors.Is(err, context.Canceled) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func newCapture(ctx context.Context, log *slog.Logger, ifaces []string, netns string, conf capture.Config) (capture.Capture, error) {
-	// TODO add multi-capture logic back
-	iface := ifaces[0]
-	return capture.NewBasic(ctx, log, iface, netns, conf)
-}
+// 	err = eg.Wait()
+// 	if errors.Is(err, context.Canceled) {
+// 		return nil
+// 	}
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 func normalizePodFilename(pod *capperpb.Pod, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
