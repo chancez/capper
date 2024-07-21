@@ -164,10 +164,10 @@ func newLocalCaptureHandle(ctx context.Context, log *slog.Logger, clock clockwor
 func (csh *localCaptureHandle) Start(ctx context.Context, handler capture.PacketHandler) error {
 	start := csh.clock.Now()
 	packetsTotal := 0
-	csh.log.Info("capture started", "interface", csh.ifaces, "snaplen", csh.conf.Snaplen, "promisc", csh.conf.Promisc, "num_packets", csh.conf.NumPackets, "duration", csh.conf.CaptureDuration)
+	csh.log.Info("multi capture started", "interface", csh.ifaces, "snaplen", csh.conf.Snaplen, "promisc", csh.conf.Promisc, "num_packets", csh.conf.NumPackets, "duration", csh.conf.CaptureDuration)
 
 	defer func() {
-		csh.log.Info("capture finished", "interface", csh.ifaces, "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
+		csh.log.Info("multi capture finished", "interface", csh.ifaces, "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
 	}()
 
 	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
