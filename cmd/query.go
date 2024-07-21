@@ -291,10 +291,11 @@ func (csh *captureStreamHandle) Close() {
 type outputFileHandler struct {
 	outputPath string
 	isDir      bool
-	writers    map[string]capture.PacketWriter
-	closers    []io.Closer
-	linkType   layers.LinkType
-	snaplen    uint32
+
+	writers  map[string]capture.PacketWriter
+	closers  []io.Closer
+	linkType layers.LinkType
+	snaplen  uint32
 }
 
 func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32) *outputFileHandler {
@@ -308,14 +309,11 @@ func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkTyp
 }
 
 func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
-	ancillaryData, err := getCapperAncillaryData(p)
+	ad, err := getCapperAncillaryData(p)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting packet ancillary data: %w", err)
 	}
-	identifier := ancillaryData.GetIdentifier()
-	if identifier == "" {
-		return fmt.Errorf("no capper identifier in AncillaryPacketData")
-	}
+	identifier := normalizeFilename(ad.NodeName, ad.Netns, ad.IfaceName, capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
 	packetWriter, exists := h.writers[identifier]
 	if !exists {
 		var w io.Writer

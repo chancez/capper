@@ -377,6 +377,10 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 // bytes to the given Capper_CaptureServer stream.
 func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
+		ad, err := getCapperAncillaryData(p)
+		if err != nil {
+			return fmt.Errorf("error getting packet AncillaryData: %w", err)
+		}
 		// send the packet on the stream
 		if err := stream.Send(&capperpb.CaptureResponse{
 			Packet: &capperpb.Packet{
@@ -387,11 +391,7 @@ func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns stri
 						CaptureLength:  int64(p.Metadata().CaptureLength),
 						Length:         int64(p.Metadata().Length),
 						InterfaceIndex: int64(p.Metadata().InterfaceIndex),
-						AncillaryData: &capperpb.AncillaryPacketData{
-							LinkType:  int64(linkType),
-							Netns:     netns,
-							IfaceName: iface.GetName(),
-						},
+						AncillaryData:  ad,
 					},
 					Truncated: p.Metadata().Truncated,
 				},

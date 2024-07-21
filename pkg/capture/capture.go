@@ -159,6 +159,7 @@ type BasicCapture struct {
 	conf  Config
 
 	iface  *capperpb.CaptureInterface
+	netns  string
 	handle *pcap.Handle
 }
 
@@ -180,6 +181,7 @@ func NewBasic(ctx context.Context, log *slog.Logger, ifaceName, netns string, co
 		clock:  clock,
 		conf:   conf,
 		iface:  iface,
+		netns:  netns,
 		handle: handle,
 	}, nil
 }
@@ -221,6 +223,12 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 
 	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
+		packet.Metadata().AncillaryData = append(packet.Metadata().AncillaryData, &capperpb.AncillaryPacketData{
+			LinkType:  int64(c.handle.LinkType()),
+			NodeName:  c.iface.Hostname,
+			Netns:     c.netns,
+			IfaceName: c.iface.Name,
+		})
 		err := handler.HandlePacket(packet)
 		if err != nil {
 			return fmt.Errorf("error handling packet: %w", err)
