@@ -356,7 +356,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 			defer handle.Close()
 			linkType := handle.LinkType()
 
-			streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), netns, handle.Interface(), conf.OutputFormat, stream)
+			streamHandler, err := newStreamPacketHandler(linkType, uint32(conf.Snaplen), conf.OutputFormat, stream)
 			if err != nil {
 				return fmt.Errorf("failed to create stream packet handler: %w", err)
 			}
@@ -375,7 +375,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 
 // newStreamPacketHandler returns a PacketHandler which writes the packets as
 // bytes to the given Capper_CaptureServer stream.
-func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, netns string, iface *capperpb.CaptureInterface, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
+func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		ad, err := getCapperAncillaryData(p)
 		if err != nil {

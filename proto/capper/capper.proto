@@ -55,15 +55,6 @@ message CaptureInfo {
   AncillaryPacketData ancillary_data = 5;
 }
 
-// TODO: What to do with this?
-message CaptureInterface {
-  string name = 1;
-  uint64 index = 2;
-  string hostname = 3;
-  uint64 netns_inode = 4;
-  string netns = 5;
-}
-
 enum PcapOutputFormat {
   OUTPUT_FORMAT_UNSPECIFIED = 0;
   OUTPUT_FORMAT_PCAP = 1;
