@@ -177,7 +177,7 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	handle, err := newCaptureQueryHandle(log, clock, req.GetCaptureRequest(), stream, mergePackets)
+	handle, err := newCaptureStreamHandle(log, clock, req.GetCaptureRequest(), stream, mergePackets)
 	if err != nil {
 		return fmt.Errorf("error creating capture: %w", err)
 	}
@@ -222,7 +222,7 @@ func (ch *commonHandler) Flush() error {
 	return ch.handler.Flush()
 }
 
-type captureQuery struct {
+type captureStreamHandle struct {
 	log          *slog.Logger
 	clock        clockwork.Clock
 	captureReq   *capperpb.CaptureRequest
@@ -231,14 +231,14 @@ type captureQuery struct {
 	mergePackets bool
 }
 
-func newCaptureQueryHandle(log *slog.Logger, clock clockwork.Clock, req *capperpb.CaptureRequest, stream captureStream, mergePackets bool) (*captureQuery, error) {
+func newCaptureStreamHandle(log *slog.Logger, clock clockwork.Clock, req *capperpb.CaptureRequest, stream captureStream, mergePackets bool) (*captureStreamHandle, error) {
 	streamSource, err := newCaptureStreamPacketSource(stream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating capture stream packet source: %w", err)
 	}
 
 	linkType := streamSource.LinkType()
-	return &captureQuery{
+	return &captureStreamHandle{
 		log:          log,
 		clock:        clock,
 		captureReq:   req,
@@ -248,27 +248,26 @@ func newCaptureQueryHandle(log *slog.Logger, clock clockwork.Clock, req *capperp
 	}, nil
 }
 
-func (cq *captureQuery) Start(ctx context.Context, handler capture.PacketHandler) error {
-	start := cq.clock.Now()
+func (csh *captureStreamHandle) Start(ctx context.Context, handler capture.PacketHandler) error {
+	start := csh.clock.Now()
 	packetsTotal := 0
-	cq.log.Info("capture started", "interface", cq.captureReq.GetInterface(), "snaplen", cq.captureReq.GetSnaplen(), "promisc", !cq.captureReq.GetNoPromiscuousMode(), "num_packets", cq.captureReq.GetNumPackets(), "duration", cq.captureReq.GetDuration())
+	csh.log.Info("capture started", "interface", csh.captureReq.GetInterface(), "snaplen", csh.captureReq.GetSnaplen(), "promisc", !csh.captureReq.GetNoPromiscuousMode(), "num_packets", csh.captureReq.GetNumPackets(), "duration", csh.captureReq.GetDuration())
 
-	defer cq.log.Info("capture finished", "interface", cq.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", cq.clock.Since(start))
+	defer csh.log.Info("capture finished", "interface", csh.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
 
-	var packetSource capture.PacketSource = gopacket.NewPacketSource(cq.source, cq.linkType)
-	if cq.mergePackets {
-		cq.log.Debug("starting packet merger")
+	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
+	if csh.mergePackets {
+		csh.log.Debug("starting packet merger")
 		heapDrainThreshold := 10
 		flushInterval := time.Second
 		mergeBufferSize := 100
 		packetSource = capture.NewPacketMerger(
-			cq.log,
+			csh.log,
 			[]capture.NamedPacketSource{{Name: "grpc-stream", PacketSource: packetSource}},
 			heapDrainThreshold, flushInterval, mergeBufferSize, 0,
 		)
 	}
 
-	defer handler.Flush()
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := handler.HandlePacket(packet); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
@@ -282,11 +281,11 @@ func (cq *captureQuery) Start(ctx context.Context, handler capture.PacketHandler
 	return nil
 }
 
-func (cq *captureQuery) LinkType() layers.LinkType {
-	return cq.linkType
+func (csh *captureStreamHandle) LinkType() layers.LinkType {
+	return csh.linkType
 }
 
-func (cq *captureQuery) Close() {
+func (csh *captureStreamHandle) Close() {
 }
 
 type outputFileHandler struct {
