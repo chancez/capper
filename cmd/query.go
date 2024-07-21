@@ -172,8 +172,6 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	}
 
 	start := clock.Now()
-	packetsTotal := 0
-
 	log.Debug("creating capture stream")
 	stream, err := c.CaptureQuery(reqCtx, req)
 	if err != nil {
@@ -181,9 +179,6 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	}
 
 	log.Info("capture started", "interface", req.GetCaptureRequest().GetInterface(), "snaplen", req.GetCaptureRequest().GetSnaplen(), "promisc", !req.GetCaptureRequest().GetNoPromiscuousMode(), "num_packets", req.GetCaptureRequest().GetNumPackets(), "duration", req.GetCaptureRequest().GetDuration())
-	defer func() {
-		log.Info("capture finished", "interface", req.GetCaptureRequest().GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
-	}()
 
 	streamSource, err := newCaptureStreamPacketSource(stream)
 	if err != nil {
@@ -191,14 +186,22 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	}
 	linkType := streamSource.LinkType()
 
+	namedSource := capture.NamedPacketSource{Name: "grpc-stream", PacketSource: gopacket.NewPacketSource(streamSource, linkType)}
+	packetsTotal, err := handlePackets(ctx, log, namedSource, linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir, mergePackets)
+	log.Info("capture finished", "interface", req.GetCaptureRequest().GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
+	return err
+}
+
+func handlePackets(ctx context.Context, log *slog.Logger, inputSource capture.NamedPacketSource, linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool, mergePackets bool) (int, error) {
+	packetsTotal := 0
 	var handlers []capture.PacketHandler
 	if printPackets {
 		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputPath != "" {
-		outputFileHandler, err := newOutputFileHandler(outputPath, isDir, linkType, uint32(req.GetCaptureRequest().GetSnaplen()))
+		outputFileHandler, err := newOutputFileHandler(outputPath, isDir, linkType, snaplen)
 		if err != nil {
-			return err
+			return packetsTotal, err
 		}
 		handlers = append(handlers, outputFileHandler)
 	}
@@ -209,7 +212,7 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
 
-	var packetSource capture.PacketSource
+	var packetSource capture.PacketSource = inputSource
 	if mergePackets {
 		log.Debug("starting packet merger")
 		heapDrainThreshold := 10
@@ -217,23 +220,21 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 		mergeBufferSize := 100
 		packetSource = capture.NewPacketMerger(
 			log,
-			[]capture.NamedPacketSource{{Name: "grpc-stream", PacketSource: gopacket.NewPacketSource(streamSource, linkType)}},
+			[]capture.NamedPacketSource{inputSource},
 			heapDrainThreshold, flushInterval, mergeBufferSize, 0,
 		)
-	} else {
-		packetSource = gopacket.NewPacketSource(streamSource, linkType)
 	}
 
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := handler.HandlePacket(packet); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-				return nil
+				return packetsTotal, nil
 			}
-			return err
+			return packetsTotal, err
 		}
 	}
 
-	return nil
+	return packetsTotal, nil
 }
 
 type outputFileHandler struct {
