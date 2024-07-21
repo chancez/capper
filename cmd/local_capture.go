@@ -170,16 +170,7 @@ func (csh *localCaptureHandle) Start(ctx context.Context, handler capture.Packet
 		csh.log.Info("multi capture finished", "interface", csh.ifaces, "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
 	}()
 
-	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
-	csh.log.Debug("starting packet merger")
-	heapDrainThreshold := 10
-	flushInterval := time.Second
-	mergeBufferSize := 100
-	packetSource = capture.NewPacketMerger(
-		csh.log,
-		[]capture.NamedPacketSource{{Name: "local-capture", PacketSource: packetSource}},
-		heapDrainThreshold, flushInterval, mergeBufferSize, 0,
-	)
+	packetSource := gopacket.NewPacketSource(csh.source, csh.linkType)
 
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := handler.HandlePacket(packet); err != nil {
@@ -202,7 +193,7 @@ func (csh *localCaptureHandle) Close() {
 }
 
 type localCaptureSource struct {
-	packets chan gopacket.Packet
+	packets chan capture.TimestampedPacket
 	errs    chan error
 
 	linkType layers.LinkType
@@ -219,10 +210,10 @@ func newLocalCaptureSource(ctx context.Context, log *slog.Logger, networkNamespa
 
 	// forwardHandler to aggregate packets from multiple capture.Capture handles
 	// into a single capture.PacketSource
-	packets := make(chan gopacket.Packet)
+	packets := make(chan capture.TimestampedPacket)
 	forwardHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
 		select {
-		case packets <- p:
+		case packets <- &capture.GoPacketWrapper{Packet: p}:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -257,6 +248,16 @@ func newLocalCaptureSource(ctx context.Context, log *slog.Logger, networkNamespa
 
 	errs := make(chan error)
 
+	log.Debug("starting packet merger")
+	heapDrainThreshold := 10
+	flushInterval := time.Second
+	mergeBufferSize := 100
+	merger := capture.NewPacketMerger(
+		log,
+		[]capture.NamedPacketSource{{Name: "local-capture", PacketSource: capture.PacketSourceChan(packets)}},
+		heapDrainThreshold, flushInterval, mergeBufferSize, 0,
+	)
+
 	go func() {
 		// wait for the handles to return before closing packets. If any handles
 		// encountered an error, send that error to ReadPacketData
@@ -268,7 +269,7 @@ func newLocalCaptureSource(ctx context.Context, log *slog.Logger, networkNamespa
 	}()
 
 	return &localCaptureSource{
-		packets:  packets,
+		packets:  merger.PacketsCtx(ctx),
 		errs:     errs,
 		linkType: linkType,
 	}, nil
@@ -276,11 +277,12 @@ func newLocalCaptureSource(ctx context.Context, log *slog.Logger, networkNamespa
 
 func (lcs *localCaptureSource) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
 	select {
-	case p, ok := <-lcs.packets:
+	case tp, ok := <-lcs.packets:
 		if !ok {
 			close(lcs.errs)
 			return nil, gopacket.CaptureInfo{}, io.EOF
 		}
+		p := tp.(*capture.GoPacketWrapper).Packet
 		return p.Data(), p.Metadata().CaptureInfo, nil
 	case err := <-lcs.errs:
 		close(lcs.errs)

@@ -139,9 +139,6 @@ func queryCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, 
 		}
 	}
 	printPackets := outputPath == "" || alwaysPrint
-	// merging packets is required to print them or send them to a non-directory file output
-	singleFileOutput := (outputPath != "" && !isDir)
-	mergePackets := printPackets || singleFileOutput
 
 	clock := clockwork.NewRealClock()
 	log.Debug("connecting to server", "server", remoteOpts.Address)
@@ -171,7 +168,7 @@ func queryCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, 
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	handle, err := newCaptureStreamHandle(log, clock, req.GetCaptureRequest(), stream, mergePackets)
+	handle, err := newCaptureStreamHandle(log, clock, req.GetCaptureRequest(), stream)
 	if err != nil {
 		return fmt.Errorf("error creating capture: %w", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/hashicorp/serf/serf"
 	"github.com/jonboulle/clockwork"
@@ -304,11 +305,41 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
+
+	stop := make(chan struct{})
+	forward := make(chan capture.TimestampedPacket)
+
+	g.log.Debug("starting packet merger")
+	heapDrainThreshold := 10
+	flushInterval := time.Second
+	mergeBufferSize := 100
+	merger := capture.NewPacketMerger(
+		g.log,
+		[]capture.NamedPacketSource{{Name: "", PacketSource: capture.PacketSourceChan(forward)}},
+		heapDrainThreshold, flushInterval, mergeBufferSize, 0,
+	)
+
+	eg.Go(func() error {
+		defer close(stop)
+		for packet := range merger.PacketsCtx(ctx) {
+			err := stream.Send(&capperpb.CaptureResponse{
+				Packet: packet.(*capture.CapperPacketWrapper).Packet,
+			})
+			if status.Code(err) == codes.Canceled {
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("error sending data to client capture stream: %w", err)
+			}
+		}
+		return nil
+	})
+
 	// Make a request for each node to be queried
 	for _, node := range nodes {
 		peer := node
 		eg.Go(func() error {
-			return g.captureNode(ctx, peer, req.GetCaptureRequest(), stream, queryTarget{
+			return g.captureNode(ctx, peer, req.GetCaptureRequest(), forward, stop, queryTarget{
 				kind:     "node",
 				nodeName: peer.Name,
 			})
@@ -328,7 +359,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 					captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 					// Override the pod filter to target the pod listed
 					captureReq.K8SPodFilter = pod
-					err := g.captureNode(ctx, peer, captureReq, stream, queryTarget{
+					err := g.captureNode(ctx, peer, captureReq, forward, stop, queryTarget{
 						kind: "pod",
 						pod:  pod,
 					})
@@ -358,7 +389,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 				captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 				// Override the pod filter to the one specified in the target
 				captureReq.K8SPodFilter = pod
-				err := g.captureNode(ctx, peer, captureReq, stream, queryTarget{
+				err := g.captureNode(ctx, peer, captureReq, forward, stop, queryTarget{
 					kind: "pod",
 					pod:  pod,
 				})
@@ -401,7 +432,7 @@ func (target queryTarget) Target() string {
 		return ""
 	}
 }
-func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, clientStream capperpb.Querier_CaptureQueryServer, target queryTarget) error {
+func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, forward chan capture.TimestampedPacket, stop chan struct{}, target queryTarget) error {
 	conn, err := s.getClient(ctx, peer)
 	if err != nil {
 		return err
@@ -431,12 +462,12 @@ func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capper
 			return fmt.Errorf("error receiving from peer capture stream: %w", err)
 		}
 
-		err = clientStream.Send(resp)
-		if status.Code(err) == codes.Canceled {
+		select {
+		case forward <- &capture.CapperPacketWrapper{Packet: resp.Packet}:
+		case <-stop:
 			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("error sending data to client capture stream: %w", err)
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }

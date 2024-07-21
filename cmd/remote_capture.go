@@ -125,7 +125,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	handle, err := newCaptureStreamHandle(log, clock, req, stream, false)
+	handle, err := newCaptureStreamHandle(log, clock, req, stream)
 	if err != nil {
 		return fmt.Errorf("error creating capture: %w", err)
 	}
