@@ -184,7 +184,7 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	handler := newCommonHandler(linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir)
+	handler := newCommonOutputHandler(linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir)
 	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)
@@ -195,11 +195,11 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	return nil
 }
 
-type commonHandler struct {
+type commonOutputHandler struct {
 	handler capture.PacketHandler
 }
 
-func newCommonHandler(linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool) *commonHandler {
+func newCommonOutputHandler(linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool) *commonOutputHandler {
 	var handlers []capture.PacketHandler
 	if printPackets {
 		handlers = append(handlers, capture.PacketPrinterHandler)
@@ -209,16 +209,16 @@ func newCommonHandler(linkType layers.LinkType, snaplen uint32, printPackets boo
 		handlers = append(handlers, outputFileHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
-	return &commonHandler{
+	return &commonOutputHandler{
 		handler: handler,
 	}
 }
 
-func (ch *commonHandler) HandlePacket(p gopacket.Packet) error {
+func (ch *commonOutputHandler) HandlePacket(p gopacket.Packet) error {
 	return ch.handler.HandlePacket(p)
 }
 
-func (ch *commonHandler) Flush() error {
+func (ch *commonOutputHandler) Flush() error {
 	return ch.handler.Flush()
 }
 

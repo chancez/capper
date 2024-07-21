@@ -124,7 +124,7 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netNam
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	handler := newCommonHandler(linkType, uint32(conf.Snaplen), printPackets, outputPath, isDir)
+	handler := newCommonOutputHandler(linkType, uint32(conf.Snaplen), printPackets, outputPath, isDir)
 	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)

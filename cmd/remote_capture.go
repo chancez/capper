@@ -137,7 +137,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	handler := newCommonHandler(linkType, uint32(req.GetSnaplen()), printPackets, outputPath, isDir)
+	handler := newCommonOutputHandler(linkType, uint32(req.GetSnaplen()), printPackets, outputPath, isDir)
 	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)
