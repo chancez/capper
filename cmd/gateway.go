@@ -308,7 +308,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 	for _, node := range nodes {
 		peer := node
 		eg.Go(func() error {
-			return g.captureQueryNode(ctx, peer, req.GetCaptureRequest(), stream, queryTarget{
+			return g.captureNode(ctx, peer, req.GetCaptureRequest(), stream, queryTarget{
 				kind:     "node",
 				nodeName: peer.Name,
 			})
@@ -328,7 +328,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 					captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 					// Override the pod filter to target the pod listed
 					captureReq.K8SPodFilter = pod
-					err := g.captureQueryNode(ctx, peer, captureReq, stream, queryTarget{
+					err := g.captureNode(ctx, peer, captureReq, stream, queryTarget{
 						kind: "pod",
 						pod:  pod,
 					})
@@ -358,7 +358,7 @@ func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperp
 				captureReq := proto.Clone(req.GetCaptureRequest()).(*capperpb.CaptureRequest)
 				// Override the pod filter to the one specified in the target
 				captureReq.K8SPodFilter = pod
-				err := g.captureQueryNode(ctx, peer, captureReq, stream, queryTarget{
+				err := g.captureNode(ctx, peer, captureReq, stream, queryTarget{
 					kind: "pod",
 					pod:  pod,
 				})
@@ -401,25 +401,7 @@ func (target queryTarget) Target() string {
 		return ""
 	}
 }
-
-func (g *gateway) captureQueryNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, stream capperpb.Querier_CaptureQueryServer, target queryTarget) error {
-	handler := captureResponseHandlerFunc(func(resp *capperpb.CaptureResponse) error {
-		return stream.Send(resp)
-	})
-	return g.captureNode(ctx, peer, req, handler, target)
-}
-
-type captureResponseHandler interface {
-	HandleResponse(*capperpb.CaptureResponse) error
-}
-
-type captureResponseHandlerFunc func(*capperpb.CaptureResponse) error
-
-func (f captureResponseHandlerFunc) HandleResponse(resp *capperpb.CaptureResponse) error {
-	return f(resp)
-}
-
-func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler, target queryTarget) error {
+func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capperpb.CaptureRequest, clientStream capperpb.Querier_CaptureQueryServer, target queryTarget) error {
 	conn, err := s.getClient(ctx, peer)
 	if err != nil {
 		return err
@@ -448,7 +430,8 @@ func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capper
 		if err != nil {
 			return fmt.Errorf("error receiving from peer capture stream: %w", err)
 		}
-		err = handler.HandleResponse(resp)
+
+		err = clientStream.Send(resp)
 		if status.Code(err) == codes.Canceled {
 			return nil
 		}
@@ -456,31 +439,6 @@ func (s *gateway) captureNode(ctx context.Context, peer serf.Member, req *capper
 			return fmt.Errorf("error sending data to client capture stream: %w", err)
 		}
 	}
-}
-
-func (s *gateway) captureMultiNodes(ctx context.Context, peers []serf.Member, req *capperpb.CaptureRequest, handler captureResponseHandler) error {
-	eg, ctx := errgroup.WithContext(ctx)
-	for _, peer := range peers {
-		peer := peer
-		if peer.Status != serf.StatusAlive {
-			s.log.Warn("skipping peer, status is not alive", "status", peer.Status)
-			continue
-		}
-		eg.Go(func() error {
-			return s.captureNode(ctx, peer, req, handler, queryTarget{
-				kind:     "node",
-				nodeName: peer.Name,
-			})
-		})
-	}
-	err := eg.Wait()
-	if errors.Is(err, context.Canceled) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (s *gateway) getPeers() []serf.Member {
