@@ -98,6 +98,7 @@ type CaptureInterface struct {
 	Hostname   string
 	NetnsInode uint64
 	Netns      string
+	LinkType   layers.LinkType
 }
 
 func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
@@ -185,6 +186,8 @@ func NewBasic(ctx context.Context, log *slog.Logger, ifaceName, netns string, co
 		return nil, fmt.Errorf("error creating handle: %w", err)
 	}
 
+	iface.LinkType = handle.LinkType()
+
 	return &BasicCapture{
 		log:    log,
 		clock:  clock,
@@ -232,7 +235,7 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
 		packet.Metadata().AncillaryData = append(packet.Metadata().AncillaryData, &capperpb.AncillaryPacketData{
-			LinkType:        int64(c.handle.LinkType()),
+			LinkType:        int64(c.iface.LinkType),
 			NodeName:        c.iface.Hostname,
 			Netns:           c.iface.Netns,
 			NetnsInode:      c.iface.NetnsInode,

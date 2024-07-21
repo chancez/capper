@@ -22,6 +22,9 @@ import (
 type NgWriterOptions struct {
 	// SectionInfo will be written to the section header
 	SectionInfo NgSectionInfo
+	// Support more advanced mapping to interface IDs based on the capture info
+	// If the callback is unable to do the mapping, it should return ok=false.
+	CaptureInfoToID func(ci gopacket.CaptureInfo, data []byte) (id int, ok bool)
 }
 
 // DefaultNgWriterOptions contain defaults for a pcapng writer used by NewWriter
@@ -241,6 +244,8 @@ func (w *NgWriter) writeSectionHeader() error {
 func (w *NgWriter) AddInterface(intf NgInterface) (id int, err error) {
 	id = int(w.intf)
 	w.indexToID[intf.Index] = id
+	// It is assumed that if the user specified w.options.CaptureInfoToID that
+	// they can reverse the mapping back by using the ID returned by AddInterface
 	w.intf++
 
 	var scratch [7]ngOption
@@ -359,7 +364,15 @@ func (w *NgWriter) WriteInterfaceStats(intf int, stats NgInterfaceStatistics) er
 
 // WritePacket writes out packet with the given data and capture info. The given InterfaceIndex must already be added to the file. InterfaceIndex 0 is automatically added by the NewWriter* methods.
 func (w *NgWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
-	id, ok := w.indexToID[ci.InterfaceIndex]
+	var (
+		id int
+		ok bool
+	)
+	if w.options.CaptureInfoToID != nil {
+		id, ok = w.options.CaptureInfoToID(ci, data)
+	} else {
+		id, ok = w.indexToID[ci.InterfaceIndex]
+	}
 	if !ok {
 		return fmt.Errorf("Can't write packet for interface %d; not configured", ci.InterfaceIndex)
 	}

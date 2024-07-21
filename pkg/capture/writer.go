@@ -44,26 +44,45 @@ func (w *PcapWriter) Flush() error {
 
 type PcapNgWriter struct {
 	ngWriter *pcapgo.NgWriter
-	linkType layers.LinkType
 	snaplen  uint32
 	os       string
-	hostname string
+
+	interfaceToID map[CaptureInterface]int
 }
 
-func NewPcapNgWriter(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaceName string, ifaceIndex int, hardware, os, hostname string) (*PcapNgWriter, error) {
+func NewPcapNgWriter(w io.Writer, iface CaptureInterface, snaplen uint32, hardware, os string) (*PcapNgWriter, error) {
+	interfaceToID := make(map[CaptureInterface]int)
 	intf := pcapgo.NgInterface{
-		Name:        ifaceName,
-		Index:       ifaceIndex,
-		LinkType:    linkType,
+		Name:        iface.Name,
+		Index:       int(iface.Index),
+		LinkType:    iface.LinkType,
 		SnapLength:  snaplen,
 		OS:          os,
-		Description: fmt.Sprintf("iface: %s hostname: %q", ifaceName, hostname),
+		Description: fmt.Sprintf("iface: %s hostname: %q", iface.Name, iface.Hostname),
 	}
+	interfaceToID[iface] = 0
+
 	ngOpts := pcapgo.NgWriterOptions{
 		SectionInfo: pcapgo.NgSectionInfo{
 			Hardware:    hardware,
 			OS:          os,
 			Application: "capper",
+		},
+		CaptureInfoToID: func(ci gopacket.CaptureInfo, data []byte) (id int, ok bool) {
+			ad, err := GetCapperAncillaryData(ci)
+			if err != nil {
+				return -1, false
+			}
+			iface := CaptureInterface{
+				Name:       ad.IfaceName,
+				Index:      uint64(ci.InterfaceIndex),
+				Hostname:   ad.NodeName,
+				Netns:      ad.Netns,
+				NetnsInode: ad.NetnsInode,
+				LinkType:   layers.LinkType(ad.LinkType),
+			}
+			id, ok = interfaceToID[iface]
+			return id, ok
 		},
 	}
 	ngWriter, err := pcapgo.NewNgWriterInterface(w, intf, ngOpts)
@@ -71,11 +90,10 @@ func NewPcapNgWriter(w io.Writer, linkType layers.LinkType, snaplen uint32, ifac
 		return nil, err
 	}
 	return &PcapNgWriter{
-		ngWriter: ngWriter,
-		linkType: linkType,
-		snaplen:  snaplen,
-		os:       os,
-		hostname: hostname,
+		ngWriter:      ngWriter,
+		snaplen:       snaplen,
+		os:            os,
+		interfaceToID: interfaceToID,
 	}, nil
 }
 
@@ -87,13 +105,17 @@ func (w *PcapNgWriter) Flush() error {
 	return w.ngWriter.Flush()
 }
 
-func (w *PcapNgWriter) AddInterface(name string, index int, linkType layers.LinkType) (int, error) {
-	return w.ngWriter.AddInterface(pcapgo.NgInterface{
-		Name:        name,
-		Index:       index,
-		LinkType:    linkType,
+func (w *PcapNgWriter) AddInterface(iface CaptureInterface) (int, error) {
+	id, err := w.ngWriter.AddInterface(pcapgo.NgInterface{
+		Name:        iface.Name,
+		Index:       int(iface.Index),
+		LinkType:    iface.LinkType,
 		SnapLength:  w.snaplen,
 		OS:          w.os,
-		Description: fmt.Sprintf("iface: %s hostname: %q", name, w.hostname),
+		Description: fmt.Sprintf("iface: %s hostname: %q", iface.Name, iface.Hostname),
 	})
+	if err == nil {
+		w.interfaceToID[iface] = id
+	}
+	return id, err
 }

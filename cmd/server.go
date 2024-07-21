@@ -376,7 +376,7 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 // bytes to the given Capper_CaptureServer stream.
 func newStreamPacketHandler(linkType layers.LinkType, snaplen uint32, stream capperpb.Capper_CaptureServer) (capture.PacketHandler, error) {
 	streamHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
-		ad, err := getCapperAncillaryData(p)
+		ad, err := capture.GetCapperAncillaryData(p.Metadata().CaptureInfo)
 		if err != nil {
 			return fmt.Errorf("error getting packet AncillaryData: %w", err)
 		}

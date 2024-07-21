@@ -56,7 +56,7 @@ type outputFileHandler struct {
 	// Unfortunately, since pcapng didn't consider multi-host captures, this
 	// means the same interface index across different hosts may clash.
 	// TODO: Update NgWriter to key by more than the interface index.
-	interfaceConfigured map[int]struct{}
+	interfaceConfigured map[capture.CaptureInterface]struct{}
 }
 
 func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat) *outputFileHandler {
@@ -67,12 +67,12 @@ func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkTyp
 		linkType:            linkType,
 		snaplen:             snaplen,
 		outputFormat:        outputFormat,
-		interfaceConfigured: make(map[int]struct{}),
+		interfaceConfigured: make(map[capture.CaptureInterface]struct{}),
 	}
 }
 
 func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
-	ad, err := getCapperAncillaryData(p)
+	ad, err := capture.GetCapperAncillaryData(p.Metadata().CaptureInfo)
 	if err != nil {
 		return fmt.Errorf("error getting packet ancillary data: %w", err)
 	}
@@ -91,16 +91,25 @@ func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
 		h.writers[identifier] = packetWriter
 	} else {
 		// We already have a writer, check if we need to update it.
-		// If we're outputting to a directory, then we have a writer for each interface, so there's no need to update it,
-		// And we only need to add interfaces for pcapng format.
-		if !h.isDir && h.outputFormat == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
-			if _, configured := h.interfaceConfigured[p.Metadata().InterfaceIndex]; !configured {
+		// We only need to add interfaces for pcapng format.
+		// We don't do this when the writer already exists because this is handled
+		// for the first interface automatically as part of capture.NewPcapNgWriter.
+		if h.outputFormat == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
+			captureIface := capture.CaptureInterface{
+				Name:       ad.IfaceName,
+				Index:      uint64(p.Metadata().InterfaceIndex),
+				Hostname:   ad.NodeName,
+				Netns:      ad.Netns,
+				NetnsInode: ad.NetnsInode,
+				LinkType:   layers.LinkType(ad.LinkType),
+			}
+			if _, configured := h.interfaceConfigured[captureIface]; !configured {
 				ngWriter := packetWriter.(*capture.PcapNgWriter)
-				_, err := ngWriter.AddInterface(ad.IfaceName, p.Metadata().InterfaceIndex, layers.LinkType(ad.LinkType))
+				_, err := ngWriter.AddInterface(captureIface)
 				if err != nil {
 					return err
 				}
-				h.interfaceConfigured[p.Metadata().InterfaceIndex] = struct{}{}
+				h.interfaceConfigured[captureIface] = struct{}{}
 			}
 		}
 	}
@@ -131,16 +140,19 @@ func (h *outputFileHandler) newPacketWriter(identifier string, interfaceIndex in
 	switch h.outputFormat {
 	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
 		var err error
-		packetWriter, err = capture.NewPcapNgWriter(
-			w, h.linkType, h.snaplen,
-			ad.GetIfaceName(), interfaceIndex,
-			ad.GetHardware(), ad.GetOperatingSystem(),
-			ad.GetNodeName(),
-		)
+		captureIface := capture.CaptureInterface{
+			Name:       ad.IfaceName,
+			Index:      uint64(interfaceIndex),
+			Hostname:   ad.NodeName,
+			Netns:      ad.Netns,
+			NetnsInode: ad.NetnsInode,
+			LinkType:   layers.LinkType(ad.LinkType),
+		}
+		packetWriter, err = capture.NewPcapNgWriter(w, captureIface, h.snaplen, ad.GetHardware(), ad.GetOperatingSystem())
 		if err != nil {
 			return nil, err
 		}
-		h.interfaceConfigured[interfaceIndex] = struct{}{}
+		h.interfaceConfigured[captureIface] = struct{}{}
 	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP:
 		fallthrough
 	default:
@@ -158,23 +170,4 @@ func (h *outputFileHandler) Flush() error {
 		err = errors.Join(err, closer.Close())
 	}
 	return err
-}
-
-func getCapperAncillaryData(p gopacket.Packet) (*capperpb.AncillaryPacketData, error) {
-	pancillaryData := p.Metadata().AncillaryData
-	if len(pancillaryData) == 0 {
-		return nil, fmt.Errorf("no gopacket AncillaryData")
-	}
-	var ancillaryData *capperpb.AncillaryPacketData
-	for _, ad := range pancillaryData {
-		var ok bool
-		ancillaryData, ok = ad.(*capperpb.AncillaryPacketData)
-		if ok {
-			break
-		}
-	}
-	if ancillaryData == nil {
-		return nil, fmt.Errorf("no capper AncillaryPacketData found in gopacket AncillaryData")
-	}
-	return ancillaryData, nil
 }

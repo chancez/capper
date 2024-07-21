@@ -15,8 +15,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
-github.com/chancez/gopacket v1.2.1-0.20240719041229-5f4144d9b475 h1:kHPOi6lBphuIsEv6qo+DnZzf5RcYoSBUDXcNgkK++Gk=
-github.com/chancez/gopacket v1.2.1-0.20240719041229-5f4144d9b475/go.mod h1:lnXM4VDqJTe4d2NoZr8DZMtidkhss2Y82QFlamXWfXo=
+github.com/chancez/gopacket v1.2.1-0.20240722032546-3e0a9b78ef2d h1:UkLDqsdDItcphXz0hfWIS30NakMU9ulHsBTC4vsjAY0=
+github.com/chancez/gopacket v1.2.1-0.20240722032546-3e0a9b78ef2d/go.mod h1:lnXM4VDqJTe4d2NoZr8DZMtidkhss2Y82QFlamXWfXo=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
 github.com/cncf/udpa/go v0.0.0-20191209042840-269d4d468f6f/go.mod h1:M8M6+tZqaGXZJjfX53e64911xZQV5JYwmTeXPW+k8Sc=
 github.com/containerd/cgroups v1.1.0 h1:v8rEWFl6EoqHB+swVNjVoCJE8o3jX7e8nqBGPLaDFBM=
