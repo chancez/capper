@@ -29,31 +29,22 @@ func (f PacketHandlerFunc) Flush() error {
 }
 
 type PcapWriterHandler struct {
-	pcapWriter *pcapgo.Writer
-	snaplen    uint32
+	pcapWriter *PcapWriter
 }
 
 func NewPcapWriterHandler(w io.Writer, linkType layers.LinkType, snaplen uint32) (*PcapWriterHandler, error) {
-	pcapWriter := pcapgo.NewWriter(w)
-	if err := pcapWriter.WriteFileHeader(snaplen, linkType); err != nil {
-		return nil, fmt.Errorf("error writing file header: %w", err)
-	}
-
+	pcapWriter := NewPcapWriter(w, linkType, snaplen)
 	return &PcapWriterHandler{
 		pcapWriter: pcapWriter,
-		snaplen:    snaplen,
 	}, nil
 }
 
 func (pwh *PcapWriterHandler) HandlePacket(p gopacket.Packet) error {
-	if err := pwh.pcapWriter.WritePacket(p.Metadata().CaptureInfo, p.Data()); err != nil {
-		return fmt.Errorf("error writing packet: %w", err)
-	}
-	return nil
+	return pwh.pcapWriter.WritePacket(p.Metadata().CaptureInfo, p.Data())
 }
 
 func (pwh *PcapWriterHandler) Flush() error {
-	return nil
+	return pwh.pcapWriter.Flush()
 }
 
 type PcapNgWriterHandler struct {
