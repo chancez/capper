@@ -4,15 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"time"
 
-	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
-	"github.com/gopacket/gopacket"
-	"github.com/gopacket/gopacket/layers"
 	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -192,73 +187,4 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 	}
 
 	return nil
-}
-
-type captureStreamHandle struct {
-	log          *slog.Logger
-	clock        clockwork.Clock
-	captureReq   *capperpb.CaptureRequest
-	source       *captureStreamPacketSource
-	linkType     layers.LinkType
-	mergePackets bool
-}
-
-func newCaptureStreamHandle(log *slog.Logger, clock clockwork.Clock, req *capperpb.CaptureRequest, stream captureStream, mergePackets bool) (*captureStreamHandle, error) {
-	streamSource, err := newCaptureStreamPacketSource(stream)
-	if err != nil {
-		return nil, fmt.Errorf("error creating capture stream packet source: %w", err)
-	}
-
-	linkType := streamSource.LinkType()
-	return &captureStreamHandle{
-		log:          log,
-		clock:        clock,
-		captureReq:   req,
-		source:       streamSource,
-		linkType:     linkType,
-		mergePackets: mergePackets,
-	}, nil
-}
-
-func (csh *captureStreamHandle) Start(ctx context.Context, handler capture.PacketHandler) error {
-	start := csh.clock.Now()
-	packetsTotal := 0
-	csh.log.Info("capture started", "interface", csh.captureReq.GetInterface(), "snaplen", csh.captureReq.GetSnaplen(), "promisc", !csh.captureReq.GetNoPromiscuousMode(), "num_packets", csh.captureReq.GetNumPackets(), "duration", csh.captureReq.GetDuration())
-
-	defer func() {
-		csh.log.Info("capture finished", "interface", csh.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
-	}()
-
-	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
-	// TODO: probably should do this in the gateway and clients shouldnt need to think about order
-	if csh.mergePackets {
-		csh.log.Debug("starting packet merger")
-		heapDrainThreshold := 10
-		flushInterval := time.Second
-		mergeBufferSize := 100
-		packetSource = capture.NewPacketMerger(
-			csh.log,
-			[]capture.NamedPacketSource{{Name: "grpc-stream", PacketSource: packetSource}},
-			heapDrainThreshold, flushInterval, mergeBufferSize, 0,
-		)
-	}
-
-	for packet := range packetSource.PacketsCtx(ctx) {
-		if err := handler.HandlePacket(packet); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-		packetsTotal++
-	}
-
-	return nil
-}
-
-func (csh *captureStreamHandle) LinkType() layers.LinkType {
-	return csh.linkType
-}
-
-func (csh *captureStreamHandle) Close() {
 }
