@@ -57,7 +57,7 @@ func NewPcapNgWriter(w io.Writer, linkType layers.LinkType, snaplen uint32, ifac
 		LinkType:    linkType,
 		SnapLength:  snaplen,
 		OS:          os,
-		Description: fmt.Sprintf("hostname: %q", hostname),
+		Description: fmt.Sprintf("iface: %s hostname: %q", ifaceName, hostname),
 	}
 	ngOpts := pcapgo.NgWriterOptions{
 		SectionInfo: pcapgo.NgSectionInfo{
@@ -94,6 +94,6 @@ func (w *PcapNgWriter) AddInterface(name string, index int, linkType layers.Link
 		LinkType:    linkType,
 		SnapLength:  w.snaplen,
 		OS:          w.os,
-		Description: fmt.Sprintf("hostname: %q", w.hostname),
+		Description: fmt.Sprintf("iface: %s hostname: %q", name, w.hostname),
 	})
 }
