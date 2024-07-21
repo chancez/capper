@@ -261,6 +261,10 @@ func (s *server) getPod(ctx context.Context, podName, namespace string) (*contai
 }
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
+	if req.GetOutputFormat() == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
+		return status.Error(codes.InvalidArgument, "pcapng format is unsupported by capture API")
+	}
+
 	ctx := stream.Context()
 	var netns string
 	if req.GetK8SPodFilter() != nil {
