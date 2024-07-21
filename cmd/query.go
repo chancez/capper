@@ -171,70 +171,122 @@ func query(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *ca
 		defer reqCancel()
 	}
 
-	start := clock.Now()
 	log.Debug("creating capture stream")
 	stream, err := c.CaptureQuery(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	log.Info("capture started", "interface", req.GetCaptureRequest().GetInterface(), "snaplen", req.GetCaptureRequest().GetSnaplen(), "promisc", !req.GetCaptureRequest().GetNoPromiscuousMode(), "num_packets", req.GetCaptureRequest().GetNumPackets(), "duration", req.GetCaptureRequest().GetDuration())
-
-	streamSource, err := newCaptureStreamPacketSource(stream)
+	handle, err := newCaptureQueryHandle(log, clock, req.GetCaptureRequest(), stream, mergePackets)
 	if err != nil {
-		return fmt.Errorf("error creating capture stream packet source: %w", err)
+		return fmt.Errorf("error creating capture: %w", err)
 	}
-	linkType := streamSource.LinkType()
+	defer handle.Close()
+	linkType := handle.LinkType()
 
-	namedSource := capture.NamedPacketSource{Name: "grpc-stream", PacketSource: gopacket.NewPacketSource(streamSource, linkType)}
-	packetsTotal, err := handlePackets(ctx, log, namedSource, linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir, mergePackets)
-	log.Info("capture finished", "interface", req.GetCaptureRequest().GetInterface(), "packets", packetsTotal, "capture_duration", clock.Since(start))
-	return err
+	handler := newCommonHandler(linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir)
+	defer handler.Flush()
+
+	err = handle.Start(ctx, handler)
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
+	}
+
+	return nil
 }
 
-func handlePackets(ctx context.Context, log *slog.Logger, inputSource capture.NamedPacketSource, linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool, mergePackets bool) (int, error) {
-	packetsTotal := 0
+type commonHandler struct {
+	handler capture.PacketHandler
+}
+
+func newCommonHandler(linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool) *commonHandler {
 	var handlers []capture.PacketHandler
 	if printPackets {
 		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputPath != "" {
-		outputFileHandler, err := newOutputFileHandler(outputPath, isDir, linkType, snaplen)
-		if err != nil {
-			return packetsTotal, err
-		}
+		outputFileHandler := newOutputFileHandler(outputPath, isDir, linkType, snaplen)
 		handlers = append(handlers, outputFileHandler)
 	}
-	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
-		packetsTotal++
-		return nil
-	})
-	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
+	return &commonHandler{
+		handler: handler,
+	}
+}
 
-	var packetSource capture.PacketSource = inputSource
-	if mergePackets {
-		log.Debug("starting packet merger")
+func (ch *commonHandler) HandlePacket(p gopacket.Packet) error {
+	return ch.handler.HandlePacket(p)
+}
+
+func (ch *commonHandler) Flush() error {
+	return ch.handler.Flush()
+}
+
+type captureQuery struct {
+	log          *slog.Logger
+	clock        clockwork.Clock
+	captureReq   *capperpb.CaptureRequest
+	source       *captureStreamPacketSource
+	linkType     layers.LinkType
+	mergePackets bool
+}
+
+func newCaptureQueryHandle(log *slog.Logger, clock clockwork.Clock, req *capperpb.CaptureRequest, stream captureStream, mergePackets bool) (*captureQuery, error) {
+	streamSource, err := newCaptureStreamPacketSource(stream)
+	if err != nil {
+		return nil, fmt.Errorf("error creating capture stream packet source: %w", err)
+	}
+
+	linkType := streamSource.LinkType()
+	return &captureQuery{
+		log:          log,
+		clock:        clock,
+		captureReq:   req,
+		source:       streamSource,
+		linkType:     linkType,
+		mergePackets: mergePackets,
+	}, nil
+}
+
+func (cq *captureQuery) Start(ctx context.Context, handler capture.PacketHandler) error {
+	start := cq.clock.Now()
+	packetsTotal := 0
+	cq.log.Info("capture started", "interface", cq.captureReq.GetInterface(), "snaplen", cq.captureReq.GetSnaplen(), "promisc", !cq.captureReq.GetNoPromiscuousMode(), "num_packets", cq.captureReq.GetNumPackets(), "duration", cq.captureReq.GetDuration())
+
+	defer cq.log.Info("capture finished", "interface", cq.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", cq.clock.Since(start))
+
+	var packetSource capture.PacketSource = gopacket.NewPacketSource(cq.source, cq.linkType)
+	if cq.mergePackets {
+		cq.log.Debug("starting packet merger")
 		heapDrainThreshold := 10
 		flushInterval := time.Second
 		mergeBufferSize := 100
 		packetSource = capture.NewPacketMerger(
-			log,
-			[]capture.NamedPacketSource{inputSource},
+			cq.log,
+			[]capture.NamedPacketSource{{Name: "grpc-stream", PacketSource: packetSource}},
 			heapDrainThreshold, flushInterval, mergeBufferSize, 0,
 		)
 	}
 
+	defer handler.Flush()
 	for packet := range packetSource.PacketsCtx(ctx) {
 		if err := handler.HandlePacket(packet); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-				return packetsTotal, nil
+				return nil
 			}
-			return packetsTotal, err
+			return err
 		}
+		packetsTotal++
 	}
 
-	return packetsTotal, nil
+	return nil
+}
+
+func (cq *captureQuery) LinkType() layers.LinkType {
+	return cq.linkType
+}
+
+func (cq *captureQuery) Close() {
 }
 
 type outputFileHandler struct {
@@ -246,14 +298,14 @@ type outputFileHandler struct {
 	snaplen    uint32
 }
 
-func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32) (*outputFileHandler, error) {
+func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32) *outputFileHandler {
 	return &outputFileHandler{
 		outputPath: outputPath,
 		isDir:      isDir,
 		writers:    make(map[string]capture.PacketWriter),
 		linkType:   linkType,
 		snaplen:    snaplen,
-	}, nil
+	}
 }
 
 func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
