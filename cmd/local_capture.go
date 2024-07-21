@@ -334,17 +334,3 @@ func outputFormatExtension(outputFormat capperpb.PcapOutputFormat) string {
 	}
 
 }
-
-func newWriteHandler(w io.Writer, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat, iface *capperpb.CaptureInterface) (capture.PacketHandler, error) {
-	var writeHandler capture.PacketHandler
-	var err error
-	switch outputFormat {
-	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
-		writeHandler, err = capture.NewPcapNgWriterHandler(w, linkType, snaplen, iface)
-	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP, capperpb.PcapOutputFormat_OUTPUT_FORMAT_UNSPECIFIED:
-		fallthrough
-	default:
-		writeHandler, err = capture.NewPcapWriterHandler(w, linkType, snaplen)
-	}
-	return writeHandler, err
-}
