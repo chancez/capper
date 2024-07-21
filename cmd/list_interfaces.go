@@ -27,7 +27,7 @@ func runListInterfaces(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	listIfaces := func() error {
+	listIfaces := func(uint64) error {
 		ifaces, err := pcap.FindAllDevs()
 		if err != nil {
 			return fmt.Errorf("error listing network interfaces: %w", err)
@@ -43,7 +43,7 @@ func runListInterfaces(cmd *cobra.Command, args []string) error {
 		return namespaces.RunInNetns(listIfaces, netns)
 	}
 
-	return listIfaces()
+	return listIfaces(0)
 }
 
 // Based on https://github.com/the-tcpdump-group/libpcap/blob/844f9d7ddff47c58f27b76c1620f38345ba73627/testprogs/findalldevstest.c#L215

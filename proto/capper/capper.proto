@@ -44,6 +44,7 @@ message AncillaryPacketData {
   string netns = 2;
   string iface_name = 3;
   string node_name = 4;
+  uint64 netns_inode = 5;
 }
 
 message CaptureInfo {
@@ -59,6 +60,8 @@ message CaptureInterface {
   string name = 1;
   uint64 index = 2;
   string hostname = 3;
+  uint64 netns_inode = 4;
+  string netns = 5;
 }
 
 enum PcapOutputFormat {

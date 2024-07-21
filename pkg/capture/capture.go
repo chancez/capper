@@ -71,7 +71,7 @@ func NewLiveHandle(iface string, netns string, filter string, snaplen int, promi
 		runCaptureOld := runCapture
 		runCapture = func() (*pcap.Handle, error) {
 			var handle *pcap.Handle
-			err := namespaces.RunInNetns(func() error {
+			err := namespaces.RunInNetns(func(nsInode uint64) error {
 				var err error
 				handle, err = runCaptureOld()
 				return err
@@ -136,9 +136,11 @@ func getInterface(ifaceName string, netns string) (*capperpb.CaptureInterface, e
 		oldGetIface := runGetIface
 		runGetIface = func() (*capperpb.CaptureInterface, error) {
 			var iface *capperpb.CaptureInterface
-			err := namespaces.RunInNetns(func() error {
+			err := namespaces.RunInNetns(func(nsInode uint64) error {
 				innerIface, innerErr := oldGetIface()
 				iface = innerIface
+				iface.NetnsInode = nsInode
+				iface.Netns = netns
 				return innerErr
 			}, netns)
 			return iface, err
@@ -159,7 +161,6 @@ type BasicCapture struct {
 	conf  Config
 
 	iface  *capperpb.CaptureInterface
-	netns  string
 	handle *pcap.Handle
 }
 
@@ -181,7 +182,6 @@ func NewBasic(ctx context.Context, log *slog.Logger, ifaceName, netns string, co
 		clock:  clock,
 		conf:   conf,
 		iface:  iface,
-		netns:  netns,
 		handle: handle,
 	}, nil
 }
@@ -224,10 +224,11 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
 		packet.Metadata().AncillaryData = append(packet.Metadata().AncillaryData, &capperpb.AncillaryPacketData{
-			LinkType:  int64(c.handle.LinkType()),
-			NodeName:  c.iface.Hostname,
-			Netns:     c.netns,
-			IfaceName: c.iface.Name,
+			LinkType:   int64(c.handle.LinkType()),
+			NodeName:   c.iface.Hostname,
+			Netns:      c.iface.Netns,
+			NetnsInode: c.iface.NetnsInode,
+			IfaceName:  c.iface.Name,
 		})
 		err := handler.HandlePacket(packet)
 		if err != nil {

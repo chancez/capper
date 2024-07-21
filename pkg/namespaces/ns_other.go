@@ -3,6 +3,6 @@
 
 package namespaces
 
-func RunInNetns(func() error, string) error {
+func RunInNetns(func(uint64) error, string) error {
 	panic("unsupported")
 }

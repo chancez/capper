@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func RunInNetns(f func() error, ns string) error {
+func RunInNetns(f func(nsInode uint64) error, ns string) error {
 	errCh := make(chan error)
 	defer close(errCh)
 	go func() {
@@ -24,12 +24,19 @@ func RunInNetns(f func() error, ns string) error {
 			errCh <- fmt.Errorf("error opening netns: %w", err)
 			return
 		}
+		fd := int(nsFd.Fd())
+		var stat unix.Stat_t
+		err = unix.Fstat(fd, &stat)
+		if err != nil {
+			errCh <- fmt.Errorf("error opening netns: %w", err)
+			return
+		}
 		defer nsFd.Close()
-		if err := unix.Setns(int(nsFd.Fd()), syscall.CLONE_NEWNET); err != nil {
+		if err := unix.Setns(fd, syscall.CLONE_NEWNET); err != nil {
 			errCh <- fmt.Errorf("error setting netns: %w", err)
 			return
 		}
-		if err := f(); err != nil {
+		if err := f(stat.Ino); err != nil {
 			errCh <- err
 			return
 		}
