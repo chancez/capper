@@ -49,7 +49,7 @@ func (c *querierClient) CaptureQuery(ctx context.Context, in *CaptureQueryReques
 }
 
 type Querier_CaptureQueryClient interface {
-	Recv() (*CaptureQueryResponse, error)
+	Recv() (*CaptureResponse, error)
 	grpc.ClientStream
 }
 
@@ -57,8 +57,8 @@ type querierCaptureQueryClient struct {
 	grpc.ClientStream
 }
 
-func (x *querierCaptureQueryClient) Recv() (*CaptureQueryResponse, error) {
-	m := new(CaptureQueryResponse)
+func (x *querierCaptureQueryClient) Recv() (*CaptureResponse, error) {
+	m := new(CaptureResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func _Querier_CaptureQuery_Handler(srv interface{}, stream grpc.ServerStream) er
 }
 
 type Querier_CaptureQueryServer interface {
-	Send(*CaptureQueryResponse) error
+	Send(*CaptureResponse) error
 	grpc.ServerStream
 }
 
@@ -110,7 +110,7 @@ type querierCaptureQueryServer struct {
 	grpc.ServerStream
 }
 
-func (x *querierCaptureQueryServer) Send(m *CaptureQueryResponse) error {
+func (x *querierCaptureQueryServer) Send(m *CaptureResponse) error {
 	return x.ServerStream.SendMsg(m)
 }
 

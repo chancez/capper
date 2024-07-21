@@ -162,6 +162,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	})
 	handlers = append(handlers, counterHandler)
 	handler := capture.ChainPacketHandlers(handlers...)
+	defer handler.Flush()
 
 	packetSource := gopacket.NewPacketSource(streamSource, linkType)
 	packetsCh := packetSource.PacketsCtx(ctx)
@@ -178,14 +179,22 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	return nil
 }
 
-type captureStreamPacketSource struct {
-	stream capperpb.Capper_CaptureClient
+type captureStream interface {
+	Recv() (*capperpb.CaptureResponse, error)
+}
 
-	resp     *capperpb.CaptureResponse
+type packetGetter interface {
+	GetPacket() *capperpb.Packet
+}
+
+type captureStreamPacketSource struct {
+	stream captureStream
+
+	resp     packetGetter
 	linkType layers.LinkType
 }
 
-func newCaptureStreamPacketSource(stream capperpb.Capper_CaptureClient) (*captureStreamPacketSource, error) {
+func newCaptureStreamPacketSource(stream captureStream) (*captureStreamPacketSource, error) {
 	resp, err := stream.Recv()
 	if status.Code(err) == codes.Canceled || err == io.EOF {
 		return nil, fmt.Errorf("stream completed during initialization: %w", err)
@@ -222,6 +231,9 @@ func (cs *captureStreamPacketSource) ReadPacketData() ([]byte, gopacket.CaptureI
 		CaptureLength:  int(respCI.GetCaptureLength()),
 		Length:         int(respCI.GetLength()),
 		InterfaceIndex: int(respCI.GetInterfaceIndex()),
+	}
+	if respCI.GetAncillaryData() != nil {
+		ci.AncillaryData = append(ci.AncillaryData, respCI.GetAncillaryData())
 	}
 	return data, ci, nil
 }

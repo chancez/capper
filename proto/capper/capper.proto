@@ -43,6 +43,8 @@ message AncillaryPacketData {
   int64 link_type = 1;
   string netns = 2;
   string iface_name = 3;
+  string identifier = 4;
+  string node_name = 5;
 }
 
 message CaptureInfo {

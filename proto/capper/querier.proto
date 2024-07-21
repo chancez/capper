@@ -7,7 +7,7 @@ import "proto/capper/capper.proto";
 option go_package = "github.com/chancez/capper/proto/capper";
 
 service Querier {
-  rpc CaptureQuery(CaptureQueryRequest) returns (stream CaptureQueryResponse) {}
+  rpc CaptureQuery(CaptureQueryRequest) returns (stream capper.CaptureResponse) {}
 }
 
 message CaptureQueryRequest {
@@ -21,10 +21,4 @@ message CaptureQueryTarget {
     capper.Pod pod = 2;
     string pod_namespace = 3;
   };
-}
-
-message CaptureQueryResponse {
-  capper.Packet packet = 1;
-  string identifier = 2;
-  string node_name = 3;
 }
