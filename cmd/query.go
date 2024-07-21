@@ -124,10 +124,10 @@ func runQuery(cmd *cobra.Command, args []string) error {
 			BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
 		},
 	}
-	return queryCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	return queryCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint, captureOpts.CaptureConfig.OutputFormat)
 }
 
-func queryCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureQueryRequest, outputPath string, alwaysPrint bool) error {
+func queryCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureQueryRequest, outputPath string, alwaysPrint bool, outputFormat capperpb.PcapOutputFormat) error {
 	var isDir bool
 	if outputPath != "" {
 		fi, err := os.Stat(outputPath)
@@ -175,7 +175,7 @@ func queryCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, 
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	handler := newCommonOutputHandler(linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir)
+	handler := newCommonOutputHandler(linkType, uint32(req.GetCaptureRequest().GetSnaplen()), printPackets, outputPath, isDir, outputFormat)
 	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)

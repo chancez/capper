@@ -79,12 +79,11 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 		K8SPodFilter:      pod,
 		NoPromiscuousMode: !captureOpts.CaptureConfig.Promisc,
 		BufferSize:        int64(captureOpts.CaptureConfig.BufferSize),
-		OutputFormat:      captureOpts.CaptureConfig.OutputFormat,
 	}
-	return remoteCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
+	return remoteCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint, captureOpts.CaptureConfig.OutputFormat)
 }
 
-func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureRequest, outputPath string, alwaysPrint bool) error {
+func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureRequest, outputPath string, alwaysPrint bool, outputFormat capperpb.PcapOutputFormat) error {
 	var isDir bool
 	if outputPath != "" {
 		fi, err := os.Stat(outputPath)
@@ -132,7 +131,7 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 	defer handle.Close()
 	linkType := handle.LinkType()
 
-	handler := newCommonOutputHandler(linkType, uint32(req.GetSnaplen()), printPackets, outputPath, isDir)
+	handler := newCommonOutputHandler(linkType, uint32(req.GetSnaplen()), printPackets, outputPath, isDir, outputFormat)
 	defer handler.Flush()
 
 	err = handle.Start(ctx, handler)

@@ -17,13 +17,13 @@ type commonOutputHandler struct {
 	handler capture.PacketHandler
 }
 
-func newCommonOutputHandler(linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool) *commonOutputHandler {
+func newCommonOutputHandler(linkType layers.LinkType, snaplen uint32, printPackets bool, outputPath string, isDir bool, outputFormat capperpb.PcapOutputFormat) *commonOutputHandler {
 	var handlers []capture.PacketHandler
 	if printPackets {
 		handlers = append(handlers, capture.PacketPrinterHandler)
 	}
 	if outputPath != "" {
-		outputFileHandler := newOutputFileHandler(outputPath, isDir, linkType, snaplen)
+		outputFileHandler := newOutputFileHandler(outputPath, isDir, linkType, snaplen, outputFormat)
 		handlers = append(handlers, outputFileHandler)
 	}
 	handler := capture.ChainPacketHandlers(handlers...)
@@ -44,19 +44,30 @@ type outputFileHandler struct {
 	outputPath string
 	isDir      bool
 
-	writers  map[string]capture.PacketWriter
-	closers  []io.Closer
-	linkType layers.LinkType
-	snaplen  uint32
+	writers map[string]capture.PacketWriter
+	// map from nodeName -> network namespace -> interfaceName
+	closers      []io.Closer
+	linkType     layers.LinkType
+	snaplen      uint32
+	outputFormat capperpb.PcapOutputFormat
+
+	// interfaceConfigured tracks if we've configured a given interface when
+	// using an NgWriter. The map is keyed by the interface index.
+	// Unfortunately, since pcapng didn't consider multi-host captures, this
+	// means the same interface index across different hosts may clash.
+	// TODO: Update NgWriter to key by more than the interface index.
+	interfaceConfigured map[int]struct{}
 }
 
-func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32) *outputFileHandler {
+func newOutputFileHandler(outputPath string, isDir bool, linkType layers.LinkType, snaplen uint32, outputFormat capperpb.PcapOutputFormat) *outputFileHandler {
 	return &outputFileHandler{
-		outputPath: outputPath,
-		isDir:      isDir,
-		writers:    make(map[string]capture.PacketWriter),
-		linkType:   linkType,
-		snaplen:    snaplen,
+		outputPath:          outputPath,
+		isDir:               isDir,
+		writers:             make(map[string]capture.PacketWriter),
+		linkType:            linkType,
+		snaplen:             snaplen,
+		outputFormat:        outputFormat,
+		interfaceConfigured: make(map[int]struct{}),
 	}
 }
 
@@ -65,30 +76,77 @@ func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
 	if err != nil {
 		return fmt.Errorf("error getting packet ancillary data: %w", err)
 	}
-	identifier := normalizeFilename(ad.NodeName, ad.Netns, ad.IfaceName, capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP)
+
+	var identifier string
+	if h.isDir {
+		identifier = normalizeFilename(ad.NodeName, ad.Netns, ad.IfaceName, h.outputFormat)
+	}
+
 	packetWriter, exists := h.writers[identifier]
 	if !exists {
-		var w io.Writer
-		if h.isDir {
-			f, err := os.Create(filepath.Join(h.outputPath, identifier))
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
-			}
-			h.closers = append(h.closers, f)
-			w = f
-		} else if h.outputPath == "-" {
-			w = os.Stdout
-		} else {
-			f, err := os.Create(h.outputPath)
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
-			}
-			h.closers = append(h.closers, f)
-			w = f
+		packetWriter, err = h.newPacketWriter(identifier, p.Metadata().InterfaceIndex, ad)
+		if err != nil {
+			return err
 		}
-		packetWriter = capture.NewPcapWriter(w, h.linkType, h.snaplen)
+		h.writers[identifier] = packetWriter
+	} else {
+		// We already have a writer, check if we need to update it.
+		// If we're outputting to a directory, then we have a writer for each interface, so there's no need to update it,
+		// And we only need to add interfaces for pcapng format.
+		if !h.isDir && h.outputFormat == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
+			if _, configured := h.interfaceConfigured[p.Metadata().InterfaceIndex]; !configured {
+				ngWriter := packetWriter.(*capture.PcapNgWriter)
+				_, err := ngWriter.AddInterface(ad.IfaceName, p.Metadata().InterfaceIndex, layers.LinkType(ad.LinkType))
+				if err != nil {
+					return err
+				}
+				h.interfaceConfigured[p.Metadata().InterfaceIndex] = struct{}{}
+			}
+		}
 	}
 	return packetWriter.WritePacket(p.Metadata().CaptureInfo, p.Data())
+}
+
+func (h *outputFileHandler) newPacketWriter(identifier string, interfaceIndex int, ad *capperpb.AncillaryPacketData) (capture.PacketWriter, error) {
+	var packetWriter capture.PacketWriter
+	var w io.Writer
+	if h.isDir {
+		f, err := os.Create(filepath.Join(h.outputPath, identifier))
+		if err != nil {
+			return nil, fmt.Errorf("error opening output: %w", err)
+		}
+		h.closers = append(h.closers, f)
+		w = f
+	} else if h.outputPath == "-" {
+		w = os.Stdout
+	} else {
+		f, err := os.Create(h.outputPath)
+		if err != nil {
+			return nil, fmt.Errorf("error opening output: %w", err)
+		}
+		h.closers = append(h.closers, f)
+		w = f
+	}
+
+	switch h.outputFormat {
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
+		var err error
+		packetWriter, err = capture.NewPcapNgWriter(
+			w, h.linkType, h.snaplen,
+			ad.GetIfaceName(), interfaceIndex,
+			ad.GetHardware(), ad.GetOperatingSystem(),
+			ad.GetNodeName(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		h.interfaceConfigured[interfaceIndex] = struct{}{}
+	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAP:
+		fallthrough
+	default:
+		packetWriter = capture.NewPcapWriter(w, h.linkType, h.snaplen)
+	}
+	return packetWriter, nil
 }
 
 func (h *outputFileHandler) Flush() error {

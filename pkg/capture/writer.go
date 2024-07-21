@@ -41,3 +41,59 @@ func (w *PcapWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
 func (w *PcapWriter) Flush() error {
 	return nil
 }
+
+type PcapNgWriter struct {
+	ngWriter *pcapgo.NgWriter
+	linkType layers.LinkType
+	snaplen  uint32
+	os       string
+	hostname string
+}
+
+func NewPcapNgWriter(w io.Writer, linkType layers.LinkType, snaplen uint32, ifaceName string, ifaceIndex int, hardware, os, hostname string) (*PcapNgWriter, error) {
+	intf := pcapgo.NgInterface{
+		Name:        ifaceName,
+		Index:       ifaceIndex,
+		LinkType:    linkType,
+		SnapLength:  snaplen,
+		OS:          os,
+		Description: fmt.Sprintf("hostname: %q", hostname),
+	}
+	ngOpts := pcapgo.NgWriterOptions{
+		SectionInfo: pcapgo.NgSectionInfo{
+			Hardware:    hardware,
+			OS:          os,
+			Application: "capper",
+		},
+	}
+	ngWriter, err := pcapgo.NewNgWriterInterface(w, intf, ngOpts)
+	if err != nil {
+		return nil, err
+	}
+	return &PcapNgWriter{
+		ngWriter: ngWriter,
+		linkType: linkType,
+		snaplen:  snaplen,
+		os:       os,
+		hostname: hostname,
+	}, nil
+}
+
+func (w *PcapNgWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
+	return w.ngWriter.WritePacket(ci, data)
+}
+
+func (w *PcapNgWriter) Flush() error {
+	return w.ngWriter.Flush()
+}
+
+func (w *PcapNgWriter) AddInterface(name string, index int, linkType layers.LinkType) (int, error) {
+	return w.ngWriter.AddInterface(pcapgo.NgInterface{
+		Name:        name,
+		Index:       index,
+		LinkType:    linkType,
+		SnapLength:  w.snaplen,
+		OS:          w.os,
+		Description: fmt.Sprintf("hostname: %q", w.hostname),
+	})
+}

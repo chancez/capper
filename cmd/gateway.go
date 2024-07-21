@@ -270,10 +270,6 @@ func (g *gateway) updatePeerMetadata(peer serf.Member, update *capperpb.NodeMeta
 }
 
 func (g *gateway) CaptureQuery(req *capperpb.CaptureQueryRequest, stream capperpb.Querier_CaptureQueryServer) error {
-	if req.GetCaptureRequest().GetOutputFormat() == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
-		return status.Error(codes.InvalidArgument, "pcapng format is unsupported by query API")
-	}
-
 	ctx := stream.Context()
 	peers := g.getPeers()
 	var nodes []serf.Member

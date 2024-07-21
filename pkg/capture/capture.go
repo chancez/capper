@@ -232,11 +232,13 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 	packetSource := gopacket.NewPacketSource(c.handle, c.handle.LinkType())
 	for packet := range packetSource.PacketsCtx(packetsCtx) {
 		packet.Metadata().AncillaryData = append(packet.Metadata().AncillaryData, &capperpb.AncillaryPacketData{
-			LinkType:   int64(c.handle.LinkType()),
-			NodeName:   c.iface.Hostname,
-			Netns:      c.iface.Netns,
-			NetnsInode: c.iface.NetnsInode,
-			IfaceName:  c.iface.Name,
+			LinkType:        int64(c.handle.LinkType()),
+			NodeName:        c.iface.Hostname,
+			Netns:           c.iface.Netns,
+			NetnsInode:      c.iface.NetnsInode,
+			IfaceName:       c.iface.Name,
+			Hardware:        runtime.GOARCH,
+			OperatingSystem: runtime.GOOS,
 		})
 		err := handler.HandlePacket(packet)
 		if err != nil {
