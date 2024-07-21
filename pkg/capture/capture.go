@@ -150,7 +150,6 @@ func getInterface(ifaceName string, netns string) (*capperpb.CaptureInterface, e
 type Capture interface {
 	LinkType() layers.LinkType
 	Start(ctx context.Context, handler PacketHandler) error
-	Interface() *capperpb.CaptureInterface
 	Close()
 }
 
