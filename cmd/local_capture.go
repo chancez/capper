@@ -9,12 +9,16 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/chancez/capper/pkg/capture"
 	"github.com/chancez/capper/pkg/containerd"
 	capperpb "github.com/chancez/capper/proto/capper"
+	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
+	"github.com/jonboulle/clockwork"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 var localCaptureCmd = &cobra.Command{
@@ -111,19 +115,11 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netNam
 	}
 	printPackets := outputPath == "" || alwaysPrint
 
-	iface := ""
-	if len(ifaces) != 0 {
-		iface = ifaces[0]
-	}
+	clock := clockwork.NewRealClock()
 
-	netns := ""
-	if len(netNamespaces) != 0 {
-		netns = netNamespaces[0]
-	}
-
-	handle, err := capture.NewBasic(ctx, log, iface, netns, conf)
+	handle, err := newLocalCaptureHandle(ctx, log, clock, ifaces, netNamespaces, conf)
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating capture: %w", err)
 	}
 	defer handle.Close()
 	linkType := handle.LinkType()
@@ -135,72 +131,166 @@ func localCapture(ctx context.Context, log *slog.Logger, ifaces []string, netNam
 	if err != nil {
 		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
+
 	return nil
 }
 
-// func localCaptureMultiNamespace(ctx context.Context, log *slog.Logger, ifaces []string, netNamespaces []string, conf capture.Config, outputDir string, alwaysPrint bool) error {
-// 	if len(netNamespaces) < 2 {
-// 		return errors.New("localCaptureMultiNamespace requires at least 2 namespaces")
-// 	}
-// 	if outputDir == "" {
-// 		return errors.New("--output-file is not specified, multi-namespace capture requires --output-file to point to a directory")
-// 	}
-// 	fi, err := os.Stat(outputDir)
-// 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-// 		return err
-// 	}
-// 	if err == nil && fi.IsDir() {
-// 		return fmt.Errorf("%s is not a directory, multi-namespace capture requires --output-file to point to a directory", outputDir)
-// 	}
+type localCaptureHandle struct {
+	log      *slog.Logger
+	clock    clockwork.Clock
+	ifaces   []string
+	conf     capture.Config
+	source   *localCaptureSource
+	linkType layers.LinkType
+}
 
-// 	var eg errgroup.Group
-// 	for _, netns := range netNamespaces {
-// 		// Create a capture per netns
-// 		handle, err := newCapture(ctx, log, ifaces, netns, conf)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		defer handle.Close()
-// 		linkType := handle.LinkType()
+func newLocalCaptureHandle(ctx context.Context, log *slog.Logger, clock clockwork.Clock, ifaces []string, netNamespaces []string, conf capture.Config) (*localCaptureHandle, error) {
+	source, err := newLocalCaptureSource(ctx, log, netNamespaces, ifaces, conf)
+	if err != nil {
+		return nil, fmt.Errorf("error creating local capture source: %w", err)
+	}
 
-// 		var handlers []capture.PacketHandler
-// 		if alwaysPrint || outputDir == "" {
-// 			handlers = append(handlers, capture.PacketPrinterHandler)
-// 		}
-// 		if outputDir != "" {
-// 			// store each capture into it's own file in the outputDirectory
-// 			hostname, _ := os.Hostname()
-// 			fileName := normalizeFilename(hostname, netns, handle.Interface().GetName(), conf.OutputFormat)
-// 			f, err := os.Create(filepath.Join(outputDir, fileName))
-// 			if err != nil {
-// 				return fmt.Errorf("error opening output: %w", err)
-// 			}
-// 			defer f.Close()
-// 			writeHandler, err := newWriteHandler(f, linkType, uint32(conf.Snaplen), conf.OutputFormat, handle.Interface())
-// 			if err != nil {
-// 				return err
-// 			}
-// 			handlers = append(handlers, writeHandler)
-// 		}
+	linkType := source.LinkType()
+	return &localCaptureHandle{
+		log:      log,
+		clock:    clock,
+		ifaces:   ifaces,
+		conf:     conf,
+		source:   source,
+		linkType: linkType,
+	}, nil
+}
 
-// 		eg.Go(func() error {
-// 			err = handle.Start(ctx, capture.ChainPacketHandlers(handlers...))
-// 			if err != nil {
-// 				return fmt.Errorf("error occurred while capturing packets: %w", err)
-// 			}
-// 			return nil
-// 		})
-// 	}
+func (csh *localCaptureHandle) Start(ctx context.Context, handler capture.PacketHandler) error {
+	start := csh.clock.Now()
+	packetsTotal := 0
+	csh.log.Info("capture started", "interface", csh.ifaces, "snaplen", csh.conf.Snaplen, "promisc", csh.conf.Promisc, "num_packets", csh.conf.NumPackets, "duration", csh.conf.CaptureDuration)
 
-// 	err = eg.Wait()
-// 	if errors.Is(err, context.Canceled) {
-// 		return nil
-// 	}
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
+	defer func() {
+		csh.log.Info("capture finished", "interface", csh.ifaces, "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
+	}()
+
+	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
+	csh.log.Debug("starting packet merger")
+	heapDrainThreshold := 10
+	flushInterval := time.Second
+	mergeBufferSize := 100
+	packetSource = capture.NewPacketMerger(
+		csh.log,
+		[]capture.NamedPacketSource{{Name: "local-capture", PacketSource: packetSource}},
+		heapDrainThreshold, flushInterval, mergeBufferSize, 0,
+	)
+
+	for packet := range packetSource.PacketsCtx(ctx) {
+		if err := handler.HandlePacket(packet); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		packetsTotal++
+	}
+
+	return nil
+}
+
+func (csh *localCaptureHandle) LinkType() layers.LinkType {
+	return csh.linkType
+}
+
+func (csh *localCaptureHandle) Close() {
+}
+
+type localCaptureSource struct {
+	packets chan gopacket.Packet
+	errs    chan error
+
+	linkType layers.LinkType
+}
+
+func newLocalCaptureSource(ctx context.Context, log *slog.Logger, networkNamespaces []string, ifaces []string, conf capture.Config) (*localCaptureSource, error) {
+	if len(networkNamespaces) == 0 {
+		networkNamespaces = []string{""}
+	}
+
+	if len(ifaces) == 0 {
+		ifaces = []string{""}
+	}
+
+	// forwardHandler to aggregate packets from multiple capture.Capture handles
+	// into a single capture.PacketSource
+	packets := make(chan gopacket.Packet)
+	forwardHandler := capture.PacketHandlerFunc(func(p gopacket.Packet) error {
+		select {
+		case packets <- p:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+
+	var linkType layers.LinkType
+	eg, ctx := errgroup.WithContext(ctx)
+
+	// Initialize a capture for each netns/interface combination
+	for _, netns := range networkNamespaces {
+		netns := netns
+		for _, iface := range ifaces {
+			iface := iface
+
+			handle, err := capture.NewBasic(ctx, log, iface, netns, conf)
+			if err != nil {
+				return nil, err
+			}
+
+			if linkType == layers.LinkTypeNull {
+				linkType = handle.LinkType()
+			}
+
+			eg.Go(func() error {
+				// Close the handle after it stops
+				defer handle.Close()
+				return handle.Start(ctx, forwardHandler)
+			})
+		}
+	}
+
+	errs := make(chan error)
+
+	go func() {
+		// wait for the handles to return before closing packets. If any handles
+		// encountered an error, send that error to ReadPacketData
+		defer close(packets)
+		err := eg.Wait()
+		if err != nil {
+			errs <- err
+		}
+	}()
+
+	return &localCaptureSource{
+		packets:  packets,
+		errs:     errs,
+		linkType: linkType,
+	}, nil
+}
+
+func (lcs *localCaptureSource) ReadPacketData() ([]byte, gopacket.CaptureInfo, error) {
+	select {
+	case p, ok := <-lcs.packets:
+		if !ok {
+			close(lcs.errs)
+			return nil, gopacket.CaptureInfo{}, io.EOF
+		}
+		return p.Data(), p.Metadata().CaptureInfo, nil
+	case err := <-lcs.errs:
+		close(lcs.errs)
+		return nil, gopacket.CaptureInfo{}, err
+	}
+}
+
+func (lcs *localCaptureSource) LinkType() layers.LinkType {
+	return lcs.linkType
+}
 
 func normalizePodFilename(pod *capperpb.Pod, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder

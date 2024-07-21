@@ -253,9 +253,12 @@ func (csh *captureStreamHandle) Start(ctx context.Context, handler capture.Packe
 	packetsTotal := 0
 	csh.log.Info("capture started", "interface", csh.captureReq.GetInterface(), "snaplen", csh.captureReq.GetSnaplen(), "promisc", !csh.captureReq.GetNoPromiscuousMode(), "num_packets", csh.captureReq.GetNumPackets(), "duration", csh.captureReq.GetDuration())
 
-	defer csh.log.Info("capture finished", "interface", csh.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
+	defer func() {
+		csh.log.Info("capture finished", "interface", csh.captureReq.GetInterface(), "packets", packetsTotal, "capture_duration", csh.clock.Since(start))
+	}()
 
 	var packetSource capture.PacketSource = gopacket.NewPacketSource(csh.source, csh.linkType)
+	// TODO: probably should do this in the gateway and clients shouldnt need to think about order
 	if csh.mergePackets {
 		csh.log.Debug("starting packet merger")
 		heapDrainThreshold := 10
