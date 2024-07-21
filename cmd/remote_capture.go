@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/chancez/capper/pkg/capture"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -90,7 +89,19 @@ func runRemoteCapture(cmd *cobra.Command, args []string) error {
 	return remoteCapture(ctx, captureOpts.Logger, remoteOpts, req, captureOpts.OutputFile, captureOpts.AlwaysPrint)
 }
 
-func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureRequest, outputFile string, alwaysPrint bool) error {
+func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts, req *capperpb.CaptureRequest, outputPath string, alwaysPrint bool) error {
+	var isDir bool
+	if outputPath != "" {
+		fi, err := os.Stat(outputPath)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil && fi.IsDir() {
+			isDir = true
+		}
+	}
+	printPackets := outputPath == "" || alwaysPrint
+
 	clock := clockwork.NewRealClock()
 	log.Debug("connecting to server", "server", remoteOpts.Address)
 	connCtx := ctx
@@ -113,67 +124,25 @@ func remoteCapture(ctx context.Context, log *slog.Logger, remoteOpts remoteOpts,
 		defer reqCancel()
 	}
 
-	start := clock.Now()
-	packetsTotal := 0
-
 	log.Debug("creating capture stream")
 	stream, err := c.Capture(reqCtx, req)
 	if err != nil {
 		return fmt.Errorf("error creating stream: %w", err)
 	}
 
-	log.Info("capture started")
-	defer func() {
-		log.Info("capture finished", "packets", packetsTotal, "capture_duration", clock.Since(start))
-	}()
-
-	streamSource, err := newCaptureStreamPacketSource(stream)
+	handle, err := newCaptureStreamHandle(log, clock, req, stream, false)
 	if err != nil {
-		return fmt.Errorf("error creating capture stream packet source: %w", err)
+		return fmt.Errorf("error creating capture: %w", err)
 	}
-	linkType := streamSource.LinkType()
+	defer handle.Close()
+	linkType := handle.LinkType()
 
-	var handlers []capture.PacketHandler
-	if alwaysPrint || outputFile == "" {
-		handlers = append(handlers, capture.PacketPrinterHandler)
-	}
-	if outputFile != "" {
-		var w io.Writer
-		if outputFile == "-" {
-			w = os.Stdout
-		} else {
-			f, err := os.Create(outputFile)
-			if err != nil {
-				return fmt.Errorf("error opening output: %w", err)
-			}
-			w = f
-			defer f.Close()
-		}
-
-		writeHandler, err := capture.NewPcapWriterHandler(w, linkType, uint32(req.GetSnaplen()))
-		if err != nil {
-			return err
-		}
-		handlers = append(handlers, writeHandler)
-	}
-	counterHandler := capture.PacketHandlerFunc(func(gopacket.Packet) error {
-		packetsTotal++
-		return nil
-	})
-	handlers = append(handlers, counterHandler)
-	handler := capture.ChainPacketHandlers(handlers...)
+	handler := newCommonHandler(linkType, uint32(req.GetSnaplen()), printPackets, outputPath, isDir)
 	defer handler.Flush()
 
-	packetSource := gopacket.NewPacketSource(streamSource, linkType)
-	packetsCh := packetSource.PacketsCtx(ctx)
-
-	for packet := range packetsCh {
-		if err := handler.HandlePacket(packet); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
+	err = handle.Start(ctx, handler)
+	if err != nil {
+		return fmt.Errorf("error occurred while capturing packets: %w", err)
 	}
 
 	return nil
