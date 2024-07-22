@@ -94,7 +94,7 @@ type Config struct {
 
 type CaptureInterface struct {
 	Name       string
-	Index      uint64
+	Index      int
 	Hostname   string
 	NetnsInode uint64
 	Netns      string
@@ -137,7 +137,7 @@ func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
 
 		return CaptureInterface{
 			Name:     selected.Name,
-			Index:    uint64(netIface.Index),
+			Index:    netIface.Index,
 			Hostname: hostname,
 		}, nil
 	}

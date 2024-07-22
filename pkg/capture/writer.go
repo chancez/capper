@@ -54,7 +54,7 @@ func NewPcapNgWriter(w io.Writer, iface CaptureInterface, snaplen uint32, hardwa
 	interfaceToID := make(map[CaptureInterface]int)
 	intf := pcapgo.NgInterface{
 		Name:        iface.Name,
-		Index:       int(iface.Index),
+		Index:       iface.Index,
 		LinkType:    iface.LinkType,
 		SnapLength:  snaplen,
 		OS:          os,
@@ -75,7 +75,7 @@ func NewPcapNgWriter(w io.Writer, iface CaptureInterface, snaplen uint32, hardwa
 			}
 			iface := CaptureInterface{
 				Name:       ad.IfaceName,
-				Index:      uint64(ci.InterfaceIndex),
+				Index:      ci.InterfaceIndex,
 				Hostname:   ad.NodeName,
 				Netns:      ad.Netns,
 				NetnsInode: ad.NetnsInode,

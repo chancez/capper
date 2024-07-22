@@ -97,7 +97,7 @@ func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
 		if h.outputFormat == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
 			captureIface := capture.CaptureInterface{
 				Name:       ad.IfaceName,
-				Index:      uint64(p.Metadata().InterfaceIndex),
+				Index:      p.Metadata().InterfaceIndex,
 				Hostname:   ad.NodeName,
 				Netns:      ad.Netns,
 				NetnsInode: ad.NetnsInode,
@@ -142,7 +142,7 @@ func (h *outputFileHandler) newPacketWriter(identifier string, interfaceIndex in
 		var err error
 		captureIface := capture.CaptureInterface{
 			Name:       ad.IfaceName,
-			Index:      uint64(interfaceIndex),
+			Index:      interfaceIndex,
 			Hostname:   ad.NodeName,
 			Netns:      ad.Netns,
 			NetnsInode: ad.NetnsInode,
