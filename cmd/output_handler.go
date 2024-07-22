@@ -79,7 +79,7 @@ func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
 
 	var identifier string
 	if h.isDir {
-		identifier = normalizeFilename(ad.NodeName, ad.Netns, ad.IfaceName, h.outputFormat)
+		identifier = normalizeFilename(ad, h.outputFormat)
 	}
 
 	packetWriter, exists := h.writers[identifier]

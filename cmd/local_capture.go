@@ -294,32 +294,22 @@ func (lcs *localCaptureSource) LinkType() layers.LinkType {
 	return lcs.linkType
 }
 
-func normalizePodFilename(pod *capperpb.Pod, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
-	var b strings.Builder
-	b.WriteString("pod:")
-	b.WriteString(pod.GetNamespace())
-	b.WriteString(":")
-	b.WriteString(pod.GetName())
-	b.WriteString(":iface:")
-	b.WriteString(ifaceName)
-	b.WriteString(".")
-	b.WriteString(outputFormatExtension(outputFormat))
-	return b.String()
-}
-
-func normalizeFilename(host string, netns string, ifaceName string, outputFormat capperpb.PcapOutputFormat) string {
+func normalizeFilename(ad *capperpb.AncillaryPacketData, outputFormat capperpb.PcapOutputFormat) string {
 	var b strings.Builder
 	b.WriteString("host:")
-	b.WriteString(host)
-	if runtime.GOOS == "linux" {
-		if netns != "" {
-			b.WriteString(":netns:")
-			netnsStr := strings.Trim(strings.ReplaceAll(netns, "/", "-"), "-")
-			b.WriteString(netnsStr)
-		}
+	b.WriteString(ad.NodeName)
+	if ad.K8SPodName != "" {
+		b.WriteString(":podNamespace:")
+		b.WriteString(ad.K8SPodNamespace)
+		b.WriteString(":pod:")
+		b.WriteString(ad.K8SPodName)
+	} else if ad.Netns != "" {
+		b.WriteString(":netns:")
+		netnsStr := strings.Trim(strings.ReplaceAll(ad.Netns, "/", "-"), "-")
+		b.WriteString(netnsStr)
 	}
 	b.WriteString(":iface:")
-	b.WriteString(ifaceName)
+	b.WriteString(ad.IfaceName)
 	b.WriteString(".")
 	b.WriteString(outputFormatExtension(outputFormat))
 	return b.String()
