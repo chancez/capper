@@ -96,12 +96,14 @@ func (h *outputFileHandler) HandlePacket(p gopacket.Packet) error {
 		// for the first interface automatically as part of capture.NewPcapNgWriter.
 		if h.outputFormat == capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG {
 			captureIface := capture.CaptureInterface{
-				Name:       ad.IfaceName,
-				Index:      p.Metadata().InterfaceIndex,
-				Hostname:   ad.NodeName,
-				Netns:      ad.Netns,
-				NetnsInode: ad.NetnsInode,
-				LinkType:   layers.LinkType(ad.LinkType),
+				Name:            ad.IfaceName,
+				Index:           p.Metadata().InterfaceIndex,
+				Hostname:        ad.NodeName,
+				Netns:           ad.Netns,
+				NetnsInode:      ad.NetnsInode,
+				LinkType:        layers.LinkType(ad.LinkType),
+				K8sPod:          ad.K8SPodName,
+				K8sPodNamespace: ad.K8SPodNamespace,
 			}
 			if _, configured := h.interfaceConfigured[captureIface]; !configured {
 				ngWriter := packetWriter.(*capture.PcapNgWriter)
@@ -141,12 +143,14 @@ func (h *outputFileHandler) newPacketWriter(identifier string, interfaceIndex in
 	case capperpb.PcapOutputFormat_OUTPUT_FORMAT_PCAPNG:
 		var err error
 		captureIface := capture.CaptureInterface{
-			Name:       ad.IfaceName,
-			Index:      interfaceIndex,
-			Hostname:   ad.NodeName,
-			Netns:      ad.Netns,
-			NetnsInode: ad.NetnsInode,
-			LinkType:   layers.LinkType(ad.LinkType),
+			Name:            ad.IfaceName,
+			Index:           interfaceIndex,
+			Hostname:        ad.NodeName,
+			Netns:           ad.Netns,
+			NetnsInode:      ad.NetnsInode,
+			LinkType:        layers.LinkType(ad.LinkType),
+			K8sPod:          ad.K8SPodName,
+			K8sPodNamespace: ad.K8SPodNamespace,
 		}
 		packetWriter, err = capture.NewPcapNgWriter(w, captureIface, h.snaplen, ad.GetHardware(), ad.GetOperatingSystem())
 		if err != nil {

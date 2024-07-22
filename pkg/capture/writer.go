@@ -3,6 +3,8 @@ package capture
 import (
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
@@ -58,7 +60,7 @@ func NewPcapNgWriter(w io.Writer, iface CaptureInterface, snaplen uint32, hardwa
 		LinkType:    iface.LinkType,
 		SnapLength:  snaplen,
 		OS:          os,
-		Description: fmt.Sprintf("iface: %s hostname: %q", iface.Name, iface.Hostname),
+		Description: interfaceDescription(iface),
 	}
 	interfaceToID[iface] = 0
 
@@ -74,12 +76,14 @@ func NewPcapNgWriter(w io.Writer, iface CaptureInterface, snaplen uint32, hardwa
 				return -1, false
 			}
 			iface := CaptureInterface{
-				Name:       ad.IfaceName,
-				Index:      ci.InterfaceIndex,
-				Hostname:   ad.NodeName,
-				Netns:      ad.Netns,
-				NetnsInode: ad.NetnsInode,
-				LinkType:   layers.LinkType(ad.LinkType),
+				Name:            ad.IfaceName,
+				Index:           ci.InterfaceIndex,
+				Hostname:        ad.NodeName,
+				Netns:           ad.Netns,
+				NetnsInode:      ad.NetnsInode,
+				LinkType:        layers.LinkType(ad.LinkType),
+				K8sPod:          ad.K8SPodName,
+				K8sPodNamespace: ad.K8SPodNamespace,
 			}
 			id, ok = interfaceToID[iface]
 			return id, ok
@@ -112,10 +116,31 @@ func (w *PcapNgWriter) AddInterface(iface CaptureInterface) (int, error) {
 		LinkType:    iface.LinkType,
 		SnapLength:  w.snaplen,
 		OS:          w.os,
-		Description: fmt.Sprintf("iface: %s hostname: %q", iface.Name, iface.Hostname),
+		Description: interfaceDescription(iface),
 	})
 	if err == nil {
 		w.interfaceToID[iface] = id
 	}
 	return id, err
+}
+
+func interfaceDescription(i CaptureInterface) string {
+	var b strings.Builder
+	b.WriteString("interface: ")
+	b.WriteString(i.Name)
+	b.WriteString(" index: ")
+	b.WriteString(strconv.Itoa(i.Index))
+	b.WriteString(" hostname: ")
+	b.WriteString(i.Hostname)
+	if i.K8sPod != "" {
+		b.WriteString(" pod: ")
+		b.WriteString(i.K8sPodNamespace)
+		b.WriteString("/")
+		b.WriteString(i.K8sPod)
+	} else if i.Netns != "" {
+		b.WriteString(" netns: ")
+		b.WriteString(i.Netns)
+	}
+
+	return b.String()
 }

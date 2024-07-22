@@ -46,6 +46,8 @@ message AncillaryPacketData {
   uint64 netns_inode = 5;
   string hardware = 6;
   string operating_system = 7;
+  string k8s_pod_name = 8;
+  string k8s_pod_namespace = 9;
 }
 
 message CaptureInfo {

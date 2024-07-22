@@ -262,16 +262,16 @@ func (s *server) getPod(ctx context.Context, podName, namespace string) (*contai
 
 func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_CaptureServer) error {
 	ctx := stream.Context()
-	var netns string
+	var pod *containerdutil.Pod
 	if req.GetK8SPodFilter() != nil {
 		podName := req.GetK8SPodFilter().GetName()
 		namespace := req.GetK8SPodFilter().GetNamespace()
-		pod, err := s.getPod(ctx, podName, namespace)
+		var err error
+		pod, err = s.getPod(ctx, podName, namespace)
 		if err != nil {
 			// don't wrap the error, getPod returns a grpc status error with codes set.
 			return err
 		}
-		netns = pod.Netns
 	}
 
 	conf := capture.Config{
@@ -282,7 +282,7 @@ func (s *server) Capture(req *capperpb.CaptureRequest, stream capperpb.Capper_Ca
 		CaptureDuration: req.GetDuration().AsDuration(),
 	}
 
-	return s.capture(ctx, req.GetInterface(), netns, conf, stream)
+	return s.capture(ctx, req.GetInterface(), pod, conf, stream)
 }
 
 func (s *server) NodeMetadata(req *capperpb.NodeMetadataRequest, stream capperpb.Capper_NodeMetadataServer) error {
@@ -340,7 +340,7 @@ func (s *server) NodeMetadata(req *capperpb.NodeMetadataRequest, stream capperpb
 	}
 }
 
-func (s *server) capture(ctx context.Context, ifaces []string, netns string, conf capture.Config, stream capperpb.Capper_CaptureServer) error {
+func (s *server) capture(ctx context.Context, ifaces []string, pod *containerdutil.Pod, conf capture.Config, stream capperpb.Capper_CaptureServer) error {
 	eg, ctx := errgroup.WithContext(ctx)
 	if len(ifaces) == 0 {
 		ifaces = []string{""}
@@ -348,7 +348,15 @@ func (s *server) capture(ctx context.Context, ifaces []string, netns string, con
 	for _, iface := range ifaces {
 		iface := iface
 		eg.Go(func() error {
-			handle, err := capture.NewBasic(ctx, s.log, iface, netns, conf)
+			var (
+				err    error
+				handle capture.Capture
+			)
+			if pod == nil {
+				handle, err = capture.NewBasic(ctx, s.log, iface, "", conf)
+			} else {
+				handle, err = capture.NewContainer(ctx, s.log, iface, pod, conf)
+			}
 			if err != nil {
 				return fmt.Errorf("error creating packet capture: %w", err)
 			}

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	containerdutil "github.com/chancez/capper/pkg/containerd"
 	"github.com/chancez/capper/pkg/namespaces"
 	capperpb "github.com/chancez/capper/proto/capper"
 	"github.com/gopacket/gopacket"
@@ -93,12 +94,14 @@ type Config struct {
 }
 
 type CaptureInterface struct {
-	Name       string
-	Index      int
-	Hostname   string
-	NetnsInode uint64
-	Netns      string
-	LinkType   layers.LinkType
+	Name            string
+	Index           int
+	Hostname        string
+	NetnsInode      uint64
+	Netns           string
+	LinkType        layers.LinkType
+	K8sPod          string
+	K8sPodNamespace string
 }
 
 func getInterface(ifaceName string, netns string) (CaptureInterface, error) {
@@ -173,13 +176,28 @@ type BasicCapture struct {
 	handle *pcap.Handle
 }
 
-func NewBasic(ctx context.Context, log *slog.Logger, ifaceName, netns string, conf Config) (*BasicCapture, error) {
+func NewBasic(ctx context.Context, log *slog.Logger, ifaceName string, netns string, conf Config) (*BasicCapture, error) {
+	pod := &containerdutil.Pod{Netns: netns}
+	return newCapture(ctx, log, ifaceName, pod, conf)
+}
+
+func NewContainer(ctx context.Context, log *slog.Logger, ifaceName string, pod *containerdutil.Pod, conf Config) (*BasicCapture, error) {
+	return newCapture(ctx, log, ifaceName, pod, conf)
+}
+
+func newCapture(ctx context.Context, log *slog.Logger, ifaceName string, pod *containerdutil.Pod, conf Config) (*BasicCapture, error) {
 	clock := clockwork.NewRealClock()
 
+	netns := ""
+	if pod != nil {
+		netns = pod.Netns
+	}
 	iface, err := getInterface(ifaceName, netns)
 	if err != nil {
 		return nil, fmt.Errorf("error getting interface: %w", err)
 	}
+	iface.K8sPod = pod.Name
+	iface.K8sPodNamespace = pod.Namespace
 
 	handle, err := NewLiveHandle(iface.Name, netns, conf.Filter, conf.Snaplen, conf.Promisc, conf.BufferSize)
 	if err != nil {
@@ -242,6 +260,8 @@ func (c *BasicCapture) Start(ctx context.Context, handler PacketHandler) error {
 			IfaceName:       c.iface.Name,
 			Hardware:        runtime.GOARCH,
 			OperatingSystem: runtime.GOOS,
+			K8SPodName:      c.iface.K8sPod,
+			K8SPodNamespace: c.iface.K8sPodNamespace,
 		})
 		err := handler.HandlePacket(packet)
 		if err != nil {
