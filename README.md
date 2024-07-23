@@ -10,20 +10,21 @@ Using [libpcap](https://www.tcpdump.org) capper can capture packets just like `t
 
 The `capper server` component exposes a GRPC API which can be remotely queried using `capper remote-capture`.
 
-You can also run the `capper gateway` which acts as a relay that federates queries to multiple `capper servers`, aggregates the results and streams them back to the client.
+You can also run the `capper gateway` which acts as a relay that federates queries to multiple `capper servers`, combining the results and streaming them back to the client.
 
 ### Features
 
-- Timed captures, run a capture for a specified amount of time then automatically stop
-- Limited captures. Specify a number of packets to capture before stopping
-- Capture packets on hosts or in containers
+- Timed captures, run a capture for a specified amount of time then automatically stop.
+- Limited captures. Specify a number of packets to capture before stopping>
+- Capture packets on hosts or in containers.
+- Capturing from multiple interfaces
 - Supports targeting Kubernetes pods via containerd integration
-- Support capturing from multiple interfaces
+  - Targeting and capturing from multiple pods
+  - Support capturing by namespace without pod names
+- pcapng output
 
 Planned features (in no particular order):
 
-- Support targeting and capturing from multiple pods
-- Support capturing by namespace without pod names
 - Support capturing by pod labels/namespace labels
 - Better default output (similar to `tcpdump` or `tshark`)
 - Helm chart
